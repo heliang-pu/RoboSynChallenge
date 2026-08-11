@@ -27,7 +27,7 @@ policy/motus/
 
 ## 0. 怎么用（每条都可直接复制执行）
 
-下面所有命令都在 **4090 (fmc3-0-outer)** 上、以 `/home/phl/workspace/RoboSynChallenge` 为
+下面所有命令都在 **4090 (fmc3-0-outer)** 上、以 `"$REPO_ROOT"` 为
 工作目录执行。
 
 ### 0.1 环境安装
@@ -35,7 +35,7 @@ policy/motus/
 一条命令建好 venv（Python 3.10 + torch 2.7.1cu128 + Motus 依赖 + EmbodiChain 仿真栈）：
 
 ```bash
-cd /home/phl/workspace/RoboSynChallenge
+cd "$REPO_ROOT"
 bash policy/motus/setup_env.sh
 ```
 
@@ -52,8 +52,8 @@ bash policy/motus/setup_env.sh --no-sim
 装完自检（脚本末尾会自动跑一遍，也可以单独执行）：
 
 ```bash
-cd /home/phl/workspace/RoboSynChallenge
-PYTHONPATH=/home/phl/workspace/EmbodiChain \
+cd "$REPO_ROOT"
+PYTHONPATH="$EMBODICHAIN_ROOT" \
   policy/motus/.venv/bin/python -c "import sys; sys.path.insert(0,'scripts'); import eval_policy; print('eval_policy OK')"
 
 policy/motus/.venv/bin/python policy/motus/tests/test_offline.py
@@ -69,53 +69,53 @@ policy/motus/.venv/bin/python policy/motus/tests/test_offline.py
 第一步把比赛的 LeRobot v3.0 数据转成 Motus 原生格式，并统计 14 维量程：
 
 ```bash
-cd /home/phl/workspace/RoboSynChallenge
+cd "$REPO_ROOT"
 policy/motus/.venv/bin/python policy/motus/prepare_data.py \
-    --lerobot-root /home/phl/workspace/RoboSynChallenge/lerobot_dataset \
-    --output-root  /home/phl/workspace/data/motus_robosyn \
+    --lerobot-root "$REPO_ROOT"/lerobot_dataset \
+    --output-root  "$WS_ROOT"/data/motus_robosyn \
     --emit-stats
 ```
 
 第二步预编码 T5（`RobotWinTaskDataset` 强制要求 `umt5_wan/` 非空；需要能加载 umT5-xxl 的机器）：
 
 ```bash
-cd /home/phl/workspace/RoboSynChallenge
+cd "$REPO_ROOT"
 policy/motus/.venv/bin/python policy/motus/prepare_data.py --t5-only \
-    --output-root /home/phl/workspace/data/motus_robosyn \
-    --wan-path    /home/phl/workspace/models/motus/Wan2.2-TI2V-5B
+    --output-root "$WS_ROOT"/data/motus_robosyn \
+    --wan-path    "$MODELS_ROOT"/motus/Wan2.2-TI2V-5B
 ```
 
 只转某几个任务、或先小规模试跑：
 
 ```bash
 policy/motus/.venv/bin/python policy/motus/prepare_data.py \
-    --lerobot-root /home/phl/workspace/RoboSynChallenge/lerobot_dataset \
-    --output-root  /home/phl/workspace/data/motus_robosyn \
+    --lerobot-root "$REPO_ROOT"/lerobot_dataset \
+    --output-root  "$WS_ROOT"/data/motus_robosyn \
     --tasks handle_basket drawer_open_place --limit-episodes 2 --overwrite
 ```
 
 ### 0.3 评估
 
 ```bash
-cd /home/phl/workspace/RoboSynChallenge
+cd "$REPO_ROOT"
 bash policy/motus/eval.sh <task_name> <setting> <ckpt_dir> <model_name> <gpu_id> [额外参数]
 ```
 
 用我们微调出来的 checkpoint（默认 `model_config: configs/robosyn_infer.yml`）：
 
 ```bash
-cd /home/phl/workspace/RoboSynChallenge
+cd "$REPO_ROOT"
 bash policy/motus/eval.sh handle_basket random \
-    /home/phl/workspace/outputs/motus-robosyn/checkpoints/checkpoint_step_20000 \
+    "$WS_ROOT"/outputs/motus-robosyn/checkpoints/checkpoint_step_20000 \
     motus 0 --max_episodes 20
 ```
 
 用官方 `Motus_robotwin2` 做零样本 sanity check（**必须**同时换模型配置和 `action_repeat`）：
 
 ```bash
-cd /home/phl/workspace/RoboSynChallenge
+cd "$REPO_ROOT"
 bash policy/motus/eval.sh handle_basket random \
-    /home/phl/workspace/models/motus/Motus_robotwin2 \
+    "$MODELS_ROOT"/motus/Motus_robotwin2 \
     motus 0 --max_episodes 5 \
     --model_config configs/robotwin2_infer.yml --action_repeat 3
 ```
@@ -134,7 +134,7 @@ bash policy/motus/eval.sh handle_basket random \
 **本机 4090 48G 训不了，需要 >80GB/卡的机器。** 在训练机上：
 
 ```bash
-cd /home/phl/workspace/RoboSynChallenge
+cd "$REPO_ROOT"
 bash policy/motus/setup_env.sh --with-train
 
 # 8 卡，用 configs/robosyn_finetune.yaml，DeepSpeed ZeRO-1
@@ -144,7 +144,7 @@ bash policy/motus/finetune.sh 8 policy/motus/configs/robosyn_finetune.yaml zero1
 改卡数 / 换 ZeRO 策略 / 指定输出目录：
 
 ```bash
-RUN_NAME=motus-robosyn-z2 OUTPUT_DIR=/home/phl/workspace/outputs/motus-z2 \
+RUN_NAME=motus-robosyn-z2 OUTPUT_DIR="$WS_ROOT"/outputs/motus-z2 \
   bash policy/motus/finetune.sh 4 policy/motus/configs/robosyn_finetune.yaml zero2
 ```
 
@@ -380,14 +380,14 @@ observation.images.cam_right_wrist video 480×640×3, AV1, 25fps
 ```bash
 # 1) 转视频 + qpos + metas，并统计 min/max 写进 configs/stat.json
 python policy/motus/prepare_data.py \
-    --lerobot-root /home/phl/workspace/RoboSynChallenge/lerobot_dataset \
-    --output-root  /home/phl/workspace/data/motus_robosyn \
+    --lerobot-root "$REPO_ROOT"/lerobot_dataset \
+    --output-root  "$WS_ROOT"/data/motus_robosyn \
     --emit-stats
 
 # 2) 预编码 T5（需要能加载 umT5-xxl 的机器；RobotWinTaskDataset 强制要求 umt5_wan/ 存在）
 python policy/motus/prepare_data.py --t5-only \
-    --output-root /home/phl/workspace/data/motus_robosyn \
-    --wan-path    /home/phl/workspace/models/motus/Wan2.2-TI2V-5B
+    --output-root "$WS_ROOT"/data/motus_robosyn \
+    --wan-path    "$MODELS_ROOT"/motus/Wan2.2-TI2V-5B
 ```
 
 `--qpos-source` 默认 `action`（记录的指令值），可选 `observation.state`（测量值）。
@@ -442,13 +442,13 @@ bash policy/motus/finetune.sh 8 policy/motus/configs/robosyn_finetune.yaml zero1
    deepspeed 融合算子（例如上训练机），必须换成真的 CUDA toolkit**。
 4. **`pytorch_kinematics` 必须从基准 venv 拷，不能装 PyPI 版**。PyPI 的 0.10.0 缺
    `Chain.forward_kinematics_tensor`，而 EmbodiChain 会调它，装了 PyPI 版会在运行期炸。
-   工作区基准 venv `/home/phl/workspace/RoboSynChallenge/.venv` 里是打过补丁的 0.10.0。
+   工作区基准 venv `"$REPO_ROOT"/.venv` 里是打过补丁的 0.10.0。
    这个包是纯 Python（无 `.so`），所以从 3.11 的 site-packages 拷到本 venv 的 3.10 是安全的。
    `setup_env.sh` 已自动处理，也可手动执行：
 
    ```bash
-   BASE=/home/phl/workspace/RoboSynChallenge/.venv/lib/python3.11/site-packages
-   DEST=/home/phl/workspace/RoboSynChallenge/policy/motus/.venv/lib/python3.10/site-packages
+   BASE="$REPO_ROOT"/.venv/lib/python3.11/site-packages
+   DEST="$REPO_ROOT"/policy/motus/.venv/lib/python3.10/site-packages
    rm -rf $DEST/pytorch_kinematics $DEST/pytorch_kinematics-*.dist-info
    cp -r $BASE/pytorch_kinematics $BASE/pytorch_kinematics-*.dist-info $DEST/
    # 校验
@@ -510,7 +510,7 @@ bash policy/motus/finetune.sh 8 policy/motus/configs/robosyn_finetune.yaml zero1
 
 ```bash
 # 语法
-cd /home/phl/workspace/RoboSynChallenge/policy/motus
+cd "$REPO_ROOT"/policy/motus
 python3 -m py_compile __init__.py deploy_policy.py motus_model.py prepare_data.py
 
 # 离线用例（三视图几何 / 动作后处理 / 归一化往返 / v3.0 转换往返）
@@ -518,5 +518,5 @@ python3 -m py_compile __init__.py deploy_policy.py motus_model.py prepare_data.p
 
 # 评测（权重就位后）
 bash policy/motus/eval.sh click_bell random \
-     /home/phl/workspace/models/motus/Motus_robotwin2 motus 0 --max_episodes 5
+     "$MODELS_ROOT"/motus/Motus_robotwin2 motus 0 --max_episodes 5
 ```

@@ -10,10 +10,19 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _HERE)
 
-OUT = sys.argv[1] if len(sys.argv) > 1 else "/home/phl/workspace/xr1_eef_smoke"
-DATASET = "/home/phl/workspace/datasets/cobotmagic_Sim_sample_loading"
+# 仓库根 = policy/xr1 上两级；工作区根 = 仓库的父目录，datasets/ 与仓库同级
+_REPO_ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))
+_WS_ROOT = os.path.dirname(_REPO_ROOT)
+
+OUT = sys.argv[1] if len(sys.argv) > 1 else os.environ.get(
+    "XR1_SMOKE_OUT", os.path.join(_WS_ROOT, "xr1_eef_smoke")
+)
+DATASET = os.environ.get(
+    "XR1_DATASET", os.path.join(_WS_ROOT, "datasets", "cobotmagic_Sim_sample_loading")
+)
 
 from mibot.data.datasets.json_dataset import JsonDataset
 from mibot.utils.io import ACTION_EPS, aa2rotm, build_action_mask

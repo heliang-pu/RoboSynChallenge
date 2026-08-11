@@ -24,12 +24,12 @@ eval_video_obs_key: cam_high
 # --- weights -------------------------------------------------------
 # ckpt_path: directory that contains mp_rank_00_model_states.pt (searched
 # recursively). Overridable with $MOTUS_CKPT or eval.sh's 3rd argument.
-ckpt_path: /home/phl/workspace/models/motus/Motus_robotwin2
+ckpt_path: ../models/motus/Motus_robotwin2
 # Wan2.2-TI2V-5B: supplies Wan2.2_VAE.pth, models_t5_umt5-xxl-enc-bf16.pth and
 # google/umt5-xxl. Only the VAE is needed once instructions are T5-cached.
-wan_path: /home/phl/workspace/models/motus/Wan2.2-TI2V-5B
+wan_path: ../models/motus/Wan2.2-TI2V-5B
 # Qwen3-VL-2B-Instruct: processor + config only, the weights come from ckpt_path.
-vlm_path: /home/phl/workspace/models/motus/Qwen3-VL-2B-Instruct
+vlm_path: ../models/motus/Qwen3-VL-2B-Instruct
 
 # --- model geometry ------------------------------------------------
 # MUST match the config the checkpoint was trained with.

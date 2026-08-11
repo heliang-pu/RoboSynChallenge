@@ -70,7 +70,7 @@ def _relocate_models_path(path, label):
     """跨机器重定位模型路径。
 
     同一份 deploy_policy.yml 要在 4090 和 pro6000 上都能用，但两台机器的模型根
-    不同（/home/phl/workspace/models vs /home/fmc3-8/workspace/models）。
+    不同（各机器的 models 目录前缀不一致）。
     配置里的路径不存在时，把 "models/" 之后的部分接到候选根上重试，
     而不是让用户改 yml（改了另一台就坏）。
     """

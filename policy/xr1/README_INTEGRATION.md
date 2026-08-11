@@ -225,7 +225,7 @@ policy/xr1/.venv/bin/python -c \
 
 * **deepspeed 构建期要 nvcc**。这台机器没装系统级 CUDA，脚本会自动去
   `/usr/local/cuda*` 和各 conda env 里找（本机命中
-  `/home/phl/miniconda3/envs/RoboTwin`，CUDA 12.1）。实在找不到就自动跳过
+  `"$CONDA_PREFIX_BASE"/envs/RoboTwin`，CUDA 12.1）。实在找不到就自动跳过
   deepspeed，只保证推理可用。
 * **安装顺序**。deepspeed 的 `setup.py` 在构建期就 `import torch`，
   所以先装 torch 再用 `--no-build-isolation` 装其余的。
@@ -459,7 +459,7 @@ OPW 走 float32、PK 走 float64 的精度差，不是语义差。
 ```bash
 # 转换（1000 集约 15 分钟，视频转码 20 并行）
 policy/xr1/.venv/bin/python policy/xr1/convert_lerobot_to_xr1.py \
-    --repo_dir /home/phl/workspace/datasets/cobotmagic_Sim_sample_loading \
+    --repo_dir "$WS_ROOT"/datasets/cobotmagic_Sim_sample_loading \
     --out_dir  policy/xr1/training_data/sample_loading_eef \
     --encoding eef --video_workers 20 \
     --instruction "Pick up the test tube, and it to the other arm, and insert it to the rack."
@@ -557,7 +557,7 @@ VLM 当冻结的视觉-语言特征提取器，动作专家去适配新本体。
 4090 被训练占满时，早期冒烟放在 pro6000 做。装法一样，但有四处要注意：
 
 ```bash
-R=/workspace/users/fmc3-8-workspace/Chen/robosynchallenge/RoboSynChallenge
+R=<该机器上的仓库路径>          # 例如 /workspace/<user>/RoboSynChallenge
 cd "$R" && BASELINE_VENV="$R/.venv" UV_BIN=/snap/bin/uv \
     bash policy/xr1/setup_env.sh --skip-deepspeed
 ```
@@ -574,7 +574,7 @@ cd "$R" && BASELINE_VENV="$R/.venv" UV_BIN=/snap/bin/uv \
    得手动补。4090 上是被别的包顺带装上了才没暴露。
 
 **权重路径跨机器自动重定位**：两台机器的模型根不同
-（`/home/phl/workspace/models` vs `/home/fmc3-0|fmc3-8/workspace/models`），
+（各机器的 models 目录前缀不一致），
 但 `deploy_policy.yml` 只有一份。`deploy_policy.py` 会在配置路径不存在时，
 把 `models/` 之后的部分接到本机候选根上重试，并打印重定位日志，
 所以**不需要为换机器改 yml**（改了另一台就坏）。可用 `XR1_MODELS_ROOT` 强制指定。

@@ -19,6 +19,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MOTUS_ROOT="$SCRIPT_DIR/Motus"
+# 路径按约定布局推导：models/ data/ outputs/ 与仓库同级，见 SETUP.md
+REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+WS_ROOT="${WS_ROOT:-$(dirname "$REPO_ROOT")}"
+MODELS_ROOT="${MODELS_ROOT:-$WS_ROOT/models}"
 VENV_DIR="$SCRIPT_DIR/.venv"
 
 NPROC="${1:-8}"
@@ -46,7 +50,7 @@ if ! "$PYTHON_BIN" -c "import deepspeed" >/dev/null 2>&1; then
     exit 1
 fi
 
-OUTPUT_DIR="${OUTPUT_DIR:-/home/phl/workspace/outputs/${RUN_NAME}}"
+OUTPUT_DIR="${OUTPUT_DIR:-$WS_ROOT/outputs/${RUN_NAME}}"
 mkdir -p "$OUTPUT_DIR"
 
 # train.py resolves `data.*`, `models.*` and `utils.*` relative to the repo root.

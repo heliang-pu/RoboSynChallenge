@@ -19,7 +19,7 @@
 ### 0.1 装环境（一次性，约 10~40 分钟）
 
 ```bash
-cd /home/phl/workspace/RoboSynChallenge
+cd "$REPO_ROOT"
 bash policy/g05/setup_env.sh
 ```
 
@@ -46,22 +46,22 @@ bash policy/g05/setup_env.sh
 
 ### 0.2 准备权重
 
-权重已下到 `/home/phl/workspace/models/g05/`。软链进 GalaxeaVLA（配置里路径都是相对项目根的 `checkpoints/...`）：
+权重已下到 `"$MODELS_ROOT"/g05/`。软链进 GalaxeaVLA（配置里路径都是相对项目根的 `checkpoints/...`）：
 
 ```bash
-cd /home/phl/workspace/RoboSynChallenge/policy/g05/GalaxeaVLA
+cd "$REPO_ROOT"/policy/g05/GalaxeaVLA
 mkdir -p checkpoints
-ln -sfn /home/phl/workspace/models/g05/action_tokenizer.pt          checkpoints/action_tokenizer.pt
-ln -sfn /home/phl/workspace/models/g05/g05-base                     checkpoints/g05-base
-ln -sfn /home/phl/workspace/models/g05/qwen3_5_2b_base_processor    checkpoints/qwen3_5_2b_base_processor
-cd /home/phl/workspace/RoboSynChallenge
+ln -sfn "$MODELS_ROOT"/g05/action_tokenizer.pt          checkpoints/action_tokenizer.pt
+ln -sfn "$MODELS_ROOT"/g05/g05-base                     checkpoints/g05-base
+ln -sfn "$MODELS_ROOT"/g05/qwen3_5_2b_base_processor    checkpoints/qwen3_5_2b_base_processor
+cd "$REPO_ROOT"
 ```
 
 需要重新下载时（gated 仓库，必须先在 HF 网页同意协议，且只能走官方源 + token，hf-mirror 拿不到）：
 
 ```bash
 huggingface-cli download OpenGalaxea/G05 --repo-type model \
-    --local-dir /home/phl/workspace/models/g05 \
+    --local-dir "$MODELS_ROOT"/g05 \
     --include "g05-base/*" "qwen3_5_2b_base_processor/*" "action_tokenizer.pt"
 ```
 
@@ -290,7 +290,7 @@ chunk[:, start : start + dim] = arr        # left_arm→0, left_gripper→6, rig
 **已就位**（gated 授权已开通，由独立进程下载）：
 
 ```
-/home/phl/workspace/models/g05/
+"$MODELS_ROOT"/g05/
 ├── action_tokenizer.pt              484M   RVQ 动作 tokenizer（共享）
 ├── g05-base/
 │   ├── .hydra/config.yaml                  模型结构 + tokenizer 配置（部署时从这里读）
@@ -304,9 +304,9 @@ GalaxeaVLA 的配置里这些路径都是**相对项目根目录**的 `checkpoin
 ```bash
 cd policy/g05/GalaxeaVLA
 mkdir -p checkpoints
-ln -sfn /home/phl/workspace/models/g05/action_tokenizer.pt checkpoints/action_tokenizer.pt
-ln -sfn /home/phl/workspace/models/g05/g05-base            checkpoints/g05-base
-ln -sfn /home/phl/workspace/models/g05/qwen3_5_2b_base_processor checkpoints/qwen3_5_2b_base_processor
+ln -sfn "$MODELS_ROOT"/g05/action_tokenizer.pt checkpoints/action_tokenizer.pt
+ln -sfn "$MODELS_ROOT"/g05/g05-base            checkpoints/g05-base
+ln -sfn "$MODELS_ROOT"/g05/qwen3_5_2b_base_processor checkpoints/qwen3_5_2b_base_processor
 ```
 
 完整权重集约 **55 GB**（含 RoboTwin checkpoint）；单个 G0.5 checkpoint 约 **11 GB**，
@@ -316,7 +316,7 @@ ln -sfn /home/phl/workspace/models/g05/qwen3_5_2b_base_processor checkpoints/qwe
 
 ```bash
 huggingface-cli download OpenGalaxea/G05 --repo-type model \
-    --local-dir /home/phl/workspace/models/g05 \
+    --local-dir "$MODELS_ROOT"/g05 \
     --include "g05-base/*" "qwen3_5_2b_base_processor/*" "action_tokenizer.pt"
 ```
 

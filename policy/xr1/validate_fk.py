@@ -10,9 +10,15 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _HERE)
 
-DATASET = "/home/phl/workspace/datasets/cobotmagic_Sim_sample_loading"
+# 仓库根 = policy/xr1 上两级；工作区根 = 仓库的父目录，datasets/ 与仓库同级
+_WS_ROOT = os.path.dirname(os.path.abspath(os.path.join(_HERE, "..", "..")))
+
+DATASET = os.environ.get(
+    "XR1_DATASET", os.path.join(_WS_ROOT, "datasets", "cobotmagic_Sim_sample_loading")
+)
 NUM_FRAMES = int(sys.argv[1]) if len(sys.argv) > 1 else 200
 
 from xr1_fk import TCP, CobotMagicFK

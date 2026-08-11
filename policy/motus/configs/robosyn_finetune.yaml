@@ -26,7 +26,7 @@ common:
 
 dataset:
   type: "robotwin"
-  dataset_dir: "/home/phl/workspace/data/motus_robosyn"
+  dataset_dir: "../data/motus_robosyn"
   data_mode: "clean"     # prepare_data.py writes into clean/ by default
   task_mode: "multi"     # train one model over all challenge tasks
   task_name: null
@@ -35,13 +35,13 @@ dataset:
 
 model:
   wan:
-    config_path: "/home/phl/workspace/models/motus/Wan2.2-TI2V-5B"
-    checkpoint_path: "/home/phl/workspace/models/motus/Wan2.2-TI2V-5B"
-    vae_path: "/home/phl/workspace/models/motus/Wan2.2-TI2V-5B/Wan2.2_VAE.pth"
+    config_path: "../models/motus/Wan2.2-TI2V-5B"
+    checkpoint_path: "../models/motus/Wan2.2-TI2V-5B"
+    vae_path: "../models/motus/Wan2.2-TI2V-5B/Wan2.2_VAE.pth"
     precision: "bfloat16"
 
   vlm:
-    checkpoint_path: "/home/phl/workspace/models/motus/Qwen3-VL-2B-Instruct"
+    checkpoint_path: "../models/motus/Qwen3-VL-2B-Instruct"
     precision: "bfloat16"
     frozen: true
 
@@ -98,7 +98,7 @@ training:
   find_unused_parameters: false
 
 system:
-  checkpoint_dir: "/home/phl/workspace/outputs/motus-robosyn/checkpoints"
+  checkpoint_dir: "../outputs/motus-robosyn/checkpoints"
   log_level: "INFO"
   log_interval: 10
   save_interval: 2000
@@ -109,7 +109,7 @@ system:
 logging:
   report_to: "tensorboard"
   wandb_project: "motus-robosyn"
-  tensorboard_log_dir: "/home/phl/workspace/outputs/motus-robosyn/tensorboard"
+  tensorboard_log_dir: "../outputs/motus-robosyn/tensorboard"
   run_name: null
 
 resume:
@@ -124,4 +124,4 @@ resume:
 # the only chunk-size-dependent tensors, so starting from Motus_robotwin2
 # (chunk 16) also works even though `common` here yields chunk 48.
 finetune:
-  checkpoint_path: "/home/phl/workspace/models/motus/Motus"
+  checkpoint_path: "../models/motus/Motus"

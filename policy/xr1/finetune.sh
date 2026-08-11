@@ -21,6 +21,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+WS_ROOT="${WS_ROOT:-$(dirname "$REPO_ROOT")}"
+MODELS_ROOT="${MODELS_ROOT:-$WS_ROOT/models}"   # 权重目录，与仓库同级
 XR1_PKG_DIR="$SCRIPT_DIR/Xiaomi-Robotics-1/xr1"
 VENV_PYTHON="$SCRIPT_DIR/.venv/bin/python"
 
@@ -33,8 +35,8 @@ EXTRA_OVERRIDES=("$@")
 DATA_DIR="$(cd "$DATA_DIR" && pwd)"
 
 # 可通过环境变量覆盖
-PRETRAINED="${PRETRAINED:-/home/phl/workspace/models/xr1/Xiaomi-Robotics-1-5B/model_states.pt}"
-BACKBONE="${BACKBONE:-/home/phl/workspace/models/backbones/Qwen3-VL-4B-Instruct}"
+PRETRAINED="${PRETRAINED:-$MODELS_ROOT/xr1/Xiaomi-Robotics-1-5B/model_states.pt}"
+BACKBONE="${BACKBONE:-$MODELS_ROOT/backbones/Qwen3-VL-4B-Instruct}"
 PROJECT="${PROJECT:-robosynchallenge-xr1}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-$SCRIPT_DIR/checkpoints}"
 MAX_LENGTH="${MAX_LENGTH:-4096}"

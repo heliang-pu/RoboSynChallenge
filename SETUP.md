@@ -28,6 +28,30 @@ workspace/
 `policy/pi05/eval.sh` 默认按 `EMBODICHAIN_ROOT=$WORKSPACE_ROOT/EmbodiChain` 定位，
 放到别处需要显式导出该环境变量。
 
+### 路径约定
+
+仓库里不写任何机器绝对路径，统一按下面两个基准推导：
+
+| 变量 | 含义 | 默认推导 |
+|---|---|---|
+| `REPO_ROOT` | 仓库根 | shell 用 `BASH_SOURCE` 上溯，Python 用 `__file__` 上溯 |
+| `WS_ROOT` | 仓库父目录 | `dirname $REPO_ROOT` |
+| `MODELS_ROOT` | 权重目录 | `$WS_ROOT/models` |
+| `EMBODICHAIN_ROOT` | 仿真框架 | `$WS_ROOT/EmbodiChain` |
+
+`models/`、`data/`、`outputs/`、`datasets/` 都与仓库**同级**：
+
+```
+workspace/
+├── EmbodiChain/
+├── RoboSynChallenge/     # 本仓库 = REPO_ROOT
+├── models/               # = MODELS_ROOT
+├── data/  outputs/  datasets/
+```
+
+四个变量都可以用环境变量覆盖。YAML 配置无法展开环境变量，里面的路径一律
+**相对仓库根**（如 `../models/...`），因此那些配置对应的命令要从仓库根执行。
+
 ## 一、仿真环境
 
 ```bash
@@ -73,7 +97,7 @@ uv sync            # 按 uv.lock 精确还原
 
 ### 预训练权重
 
-权重不入版本库，统一放在**仓库外**的模型目录，开发机上是 `/home/phl/workspace/models`：
+权重不入版本库，统一放在**仓库外**的模型目录，开发机上是 `"$MODELS_ROOT"`：
 
 ```
 models/
@@ -91,7 +115,7 @@ models/
 
 ```python
 weight_loader=weight_loaders.CheckpointWeightLoader(
-    "/home/phl/workspace/models/openpi-assets/checkpoints/pi05_base/params"
+    "$MODELS_ROOT/openpi-assets/checkpoints/pi05_base/params"
 ),
 ```
 

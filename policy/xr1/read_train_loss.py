@@ -9,8 +9,9 @@ import json
 import os
 import sys
 
-DEFAULT_GLOB = os.path.expanduser(
-    "/home/phl/workspace/RoboSynChallenge/policy/xr1/Xiaomi-Robotics-1/xr1/wandb/offline-run-*"
+DEFAULT_GLOB = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "Xiaomi-Robotics-1", "xr1", "wandb", "offline-run-*",
 )
 
 run_dir = sys.argv[1] if len(sys.argv) > 1 else sorted(glob.glob(DEFAULT_GLOB))[-1]

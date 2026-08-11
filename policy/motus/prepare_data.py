@@ -23,12 +23,12 @@
 #
 # Usage:
 #   python policy/motus/prepare_data.py \
-#       --lerobot-root /home/phl/workspace/RoboSynChallenge/lerobot_dataset \
-#       --output-root  /home/phl/workspace/data/motus_robosyn \
+#       --lerobot-root <仓库根>/lerobot_dataset \
+#       --output-root  <工作区根>/data/motus_robosyn \
 #       --emit-stats
 #   # then, on a box where the T5 encoder can be loaded:
 #   python policy/motus/prepare_data.py --output-root ... --t5-only \
-#       --wan-path /home/phl/workspace/models/motus/Wan2.2-TI2V-5B
+#       --wan-path <工作区根>/models/motus/Wan2.2-TI2V-5B
 # ----------------------------------------------------------------------------
 
 from __future__ import annotations

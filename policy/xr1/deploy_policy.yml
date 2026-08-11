@@ -24,10 +24,10 @@ train_config_name: null
 
 # 权重解析优先级: model_path > checkpoints/<train_config_name>/<model_name> > pretrained_ckpt
 model_path: null
-pretrained_ckpt: /home/phl/workspace/models/xr1/Xiaomi-Robotics-1-5B/model_states.pt
+pretrained_ckpt: ../models/xr1/Xiaomi-Robotics-1-5B/model_states.pt
 
 # XR-1 的 VLM 骨架，必须是本地可用的 Qwen3-VL-4B-Instruct 目录
-backbone_path: /home/phl/workspace/models/backbones/Qwen3-VL-4B-Instruct
+backbone_path: ../models/backbones/Qwen3-VL-4B-Instruct
 
 # XR-1 源码位置（含 mibot 包），留空则用 policy/xr1/Xiaomi-Robotics-1/xr1
 xr1_repo: null

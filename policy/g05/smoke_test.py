@@ -218,7 +218,10 @@ def _t7():
     """
     import os
 
-    embodichain = Path(os.environ.get("EMBODICHAIN_ROOT", "/home/phl/workspace/EmbodiChain"))
+    # 默认按约定布局取仓库的同级目录（见 SETUP.md「目录布局」）
+    embodichain = Path(
+        os.environ.get("EMBODICHAIN_ROOT", str(REPO_ROOT.parent / "EmbodiChain"))
+    )
     for p in (str(REPO_ROOT), str(embodichain)):
         if Path(p).exists() and p not in sys.path:
             sys.path.insert(0, p)

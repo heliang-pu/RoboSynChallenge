@@ -10,12 +10,20 @@ set -uo pipefail
 STEP="${1:?用法: smoke_ckpt.sh <step> [episodes]}"
 EPISODES="${2:-5}"
 
-REPO=/workspace/users/fmc3-8-workspace/Chen/robosynchallenge/RoboSynChallenge
-SRC_HOST=phl@192.168.1.138
-SRC=/home/phl/workspace/RoboSynChallenge/policy/xr1/checkpoints/project_robosynchallenge-xr1/sample_loading_eef
-DST=/workspace/xr1_deploy/step${STEP}
+# 跨机同步，以下四项与具体机器绑定，按需用环境变量覆盖：
+#   SRC_HOST  训练机的 ssh 目标，形如 user@host
+#   SRC_REPO  训练机上的仓库路径
+#   REPO      本机（评测机）上的仓库路径，默认按脚本位置推导
+#   DEPLOY    本机存放同步过来的 ckpt 的位置
+SRC_HOST="${SRC_HOST:?请设置 SRC_HOST，例如 export SRC_HOST=user@train-host}"
+SRC_REPO="${SRC_REPO:?请设置 SRC_REPO，即训练机上的仓库路径}"
+REPO="${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+DEPLOY="${DEPLOY:-/workspace/xr1_deploy}"
+
+SRC="$SRC_REPO/policy/xr1/checkpoints/project_robosynchallenge-xr1/sample_loading_eef"
+DST="$DEPLOY/step${STEP}"
 STATS="$REPO/policy/xr1/training_data/sample_loading_eef/xr1_stats.json"
-LOG=/workspace/xr1_smoke_step${STEP}.log
+LOG="${LOG:-/workspace/xr1_smoke_step${STEP}.log}"
 
 echo ">>> [1/3] 同步 ckpt-${STEP}"
 if [[ ! -f "$DST/last.ckpt/checkpoint/mp_rank_00_model_states.pt" ]]; then

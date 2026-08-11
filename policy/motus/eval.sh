@@ -1,7 +1,7 @@
 #!/bin/bash
 # ----------------------------------------------------------------------------
 # bash eval.sh <task_name> <setting> <ckpt_path> <model_name> [gpu_id] [extra_opts...]
-# bash eval.sh click_bell random /home/phl/workspace/models/motus/Motus_robotwin2 motus 0 --max_episodes 20
+# bash eval.sh click_bell random "$MODELS_ROOT"/motus/Motus_robotwin2 motus 0 --max_episodes 20
 # ----------------------------------------------------------------------------
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

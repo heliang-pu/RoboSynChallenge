@@ -246,13 +246,13 @@ cat <<EOF
   权重（OpenGalaxea/G05 是 gated 仓库，必须先在 HF 网页同意协议，
         且只能走官方源 + token —— hf-mirror 拿不到 gated 仓库）:
     huggingface-cli download OpenGalaxea/G05 --repo-type model \\
-        --local-dir /home/phl/workspace/models/g05 \\
+        --local-dir "$MODELS_ROOT"/g05 \\
         --include "g05-base/*" "qwen3_5_2b_base_processor/*" "action_tokenizer.pt"
 
   然后软链进 GalaxeaVLA（配置里的路径都是相对项目根的 checkpoints/...）:
-    ln -sfn /home/phl/workspace/models/g05/action_tokenizer.pt \\
+    ln -sfn "$MODELS_ROOT"/g05/action_tokenizer.pt \\
             $SCRIPT_DIR/GalaxeaVLA/checkpoints/action_tokenizer.pt
-    ln -sfn /home/phl/workspace/models/g05/g05-base \\
+    ln -sfn "$MODELS_ROOT"/g05/g05-base \\
             $SCRIPT_DIR/GalaxeaVLA/checkpoints/g05-base
 
   跑评估（注意 g05-base 是预训练权重，不能零样本部署，详见 README_INTEGRATION.md 第 8.1 节）:
