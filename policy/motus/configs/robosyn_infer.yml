@@ -1,0 +1,51 @@
+# Motus model config for RoboSynChallenge checkpoints (cobotmagic, 14-DoF).
+#
+# ! This file must stay identical to the `common` / `model` blocks of the
+# ! training config (configs/robosyn_finetune.yaml). action_expert.pos_embedding
+# ! is a buffer sized (chunk_size + 1 + num_registers), so a mismatch makes
+# ! load_checkpoint fail with a size-mismatch error.
+#
+#   action_chunk_size = num_video_frames * video_action_freq_ratio = 8 * 6 = 48
+#   global_downsample_rate = 1  ->  actions are consecutive 25 Hz env steps,
+#                                   so deploy runs with action_repeat: 1.
+
+common:
+  action_dim: 14         # [left_joint1..6, left_gripper, right_joint1..6, right_gripper]
+  state_dim: 14
+
+  num_video_frames: 8    # future frames predicted jointly with the action chunk
+  video_height: 384      # three-view frame is padded to 384x320
+  video_width: 320
+
+  global_downsample_rate: 1     # 25 Hz data consumed at 25 Hz
+  video_action_freq_ratio: 6    # one predicted frame per 6 actions (0.24 s)
+
+model:
+  wan:
+    precision: "bfloat16"
+
+  action_expert:
+    hidden_size: 1024      # multiple of 128 (head_dim=128)
+    ffn_dim_multiplier: 4
+    norm_eps: 1e-5
+
+  und_expert:
+    hidden_size: 512
+    ffn_dim_multiplier: 4
+    norm_eps: 1e-5
+    vlm:
+      input_dim: 2048            # Qwen3-VL-2B hidden size
+      projector_type: "mlp3x_silu"
+
+  time_distribution:
+    timestep_sample_method: "logit_normal"
+    sigmoid_scale: 1.0
+    min_t: 0.0
+    max_t: 1.0
+
+  inference:
+    num_inference_timesteps: 10   # Euler flow-matching steps
+
+  loss_weights:
+    video_loss_weight: 1.0
+    action_loss_weight: 1.0

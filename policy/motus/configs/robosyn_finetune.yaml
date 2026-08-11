@@ -1,0 +1,127 @@
+# Motus Stage-3 SFT config for RoboSynChallenge (cobotmagic, 14-DoF, 25 fps).
+#
+# Consumes the native "robotwin" layout produced by policy/motus/prepare_data.py:
+#   <dataset_dir>/clean/<task>/{videos,qpos,metas,umt5_wan}/{i}.*
+#
+# NOTE ON NORMALIZATION: RobotWinTaskDataset feeds raw qpos — its normalization
+# calls are commented out upstream (robotwin_agilex_dataset.py:333-334). A model
+# trained with this config therefore predicts absolute joint positions directly,
+# which is why deploy_policy.yml runs with action_normalization: none.
+#
+# HARDWARE: needs >80GB per GPU (A100-80G / H100 / B200). The 48GB RTX 4090 in
+# this workspace can run inference but NOT training.
+
+common:
+  action_dim: 14
+  state_dim: 14
+
+  num_video_frames: 8
+  video_height: 384
+  video_width: 320
+
+  # 25 fps data used at native rate; action_chunk_size = 8 * 6 = 48 (1.92 s).
+  # Keep these two identical to policy/motus/configs/robosyn_infer.yml.
+  global_downsample_rate: 1
+  video_action_freq_ratio: 6
+
+dataset:
+  type: "robotwin"
+  dataset_dir: "/home/phl/workspace/data/motus_robosyn"
+  data_mode: "clean"     # prepare_data.py writes into clean/ by default
+  task_mode: "multi"     # train one model over all challenge tasks
+  task_name: null
+  max_episodes: null
+  image_aug: false
+
+model:
+  wan:
+    config_path: "/home/phl/workspace/models/motus/Wan2.2-TI2V-5B"
+    checkpoint_path: "/home/phl/workspace/models/motus/Wan2.2-TI2V-5B"
+    vae_path: "/home/phl/workspace/models/motus/Wan2.2-TI2V-5B/Wan2.2_VAE.pth"
+    precision: "bfloat16"
+
+  vlm:
+    checkpoint_path: "/home/phl/workspace/models/motus/Qwen3-VL-2B-Instruct"
+    precision: "bfloat16"
+    frozen: true
+
+  action_expert:
+    hidden_size: 1024
+    ffn_dim_multiplier: 4
+    norm_eps: 1e-5
+
+  und_expert:
+    hidden_size: 512
+    ffn_dim_multiplier: 4
+    norm_eps: 1e-5
+    vlm:
+      input_dim: 2048
+      projector_type: "mlp3x_silu"
+
+  time_distribution:
+    timestep_sample_method: "logit_normal"
+    sigmoid_scale: 1.0
+    min_t: 0.0
+    max_t: 1.0
+
+  inference:
+    num_inference_timesteps: 10
+
+  loss_weights:
+    video_loss_weight: 1.0
+    action_loss_weight: 1.0
+
+  ema:
+    enabled: false
+    update_after_step: 0
+    inv_gamma: 1.0
+    power: 0.75
+    min_value: 0.0
+    max_value: 0.9999
+
+training:
+  # 8x80GB reference. Halve on 4 GPUs and raise gradient accumulation if the
+  # DeepSpeed config exposes it.
+  batch_size: 8
+  max_steps: 40000        # ~50 demos x 10 tasks; watch val loss and stop early
+  learning_rate: 5.0e-5
+  weight_decay: 0.01
+
+  scheduler_type: "linear"
+  warmup_steps: 200
+  cycle_length: 40000
+  f_max: 0.99
+  f_min: 0.4
+
+  grad_clip_norm: 0.5
+  use_amp: true
+  find_unused_parameters: false
+
+system:
+  checkpoint_dir: "/home/phl/workspace/outputs/motus-robosyn/checkpoints"
+  log_level: "INFO"
+  log_interval: 10
+  save_interval: 2000
+  val_interval: 500
+  num_workers: 8
+  pin_memory: true
+
+logging:
+  report_to: "tensorboard"
+  wandb_project: "motus-robosyn"
+  tensorboard_log_dir: "/home/phl/workspace/outputs/motus-robosyn/tensorboard"
+  run_name: null
+
+resume:
+  checkpoint_path: null
+
+# Stage-2 latent-action pretrained checkpoint (motus-robotics/Motus).
+#
+# train.py routes this through Motus.load_pretrain_weights(), which expects
+#   <checkpoint_path>/pytorch_model/mp_rank_00_model_states.pt
+# (note the extra pytorch_model/ level, unlike inference's load_checkpoint)
+# and skips action_expert.input_encoder.* / action_expert.decoder.*. Those are
+# the only chunk-size-dependent tensors, so starting from Motus_robotwin2
+# (chunk 16) also works even though `common` here yields chunk 48.
+finetune:
+  checkpoint_path: "/home/phl/workspace/models/motus/Motus"

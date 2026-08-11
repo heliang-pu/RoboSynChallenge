@@ -1,0 +1,40 @@
+# =============================================================================
+# RoboSynChallenge 仿真 / 数据采集环境
+#
+#   conda env create -f environment.yml
+#   conda activate robosyn
+#
+# 这是「两个环境」中的第一个，只负责仿真、专家数据采集和策略评估。
+# 训练侧 (policy/pi05) 用完全独立的 uv 环境，两者的 torch 版本不兼容，
+# 绝对不要合并 —— 详见 SETUP.md。
+#
+# 装完还需要三步可编辑安装（见 SETUP.md），requirements.txt 里不含它们：
+#   pip install -e ../EmbodiChain
+#   pip install -e ../EmbodiChain/embodichain_tasks
+#   pip install -e .
+# =============================================================================
+name: robosyn
+
+channels:
+  - defaults
+
+dependencies:
+  # 版本必须钉死在 3.11 —— dexsim-engine 只发布 cp311 的 wheel
+  - python=3.11.15
+  - pip
+
+  # 其余全部走 pip。不用 conda 装 torch/科学计算栈，
+  # 因为 dexsim-engine 的二进制扩展是针对 pip 版 torch ABI 编译的，
+  # 混装 conda-forge 的 torch 会在 import 时报符号找不到。
+  - pip:
+      - -r requirements.txt
+
+# -----------------------------------------------------------------------------
+# 环境成立的前提（不由本文件保证，需自行核对）
+# -----------------------------------------------------------------------------
+#   NVIDIA 驱动    >= 580.173.02   （开发机实测版本）
+#   CUDA runtime   12.8            （torch 2.10.0+cu128 自带，无需系统装 CUDA）
+#   GPU            仿真渲染走 Vulkan，需要可用的 Vulkan runtime
+#
+# dexsim-engine==0.4.3 是闭源包，公开 PyPI 上没有，
+# 需要 DexForce 提供的索引或 wheel。没有它整个仿真侧都跑不起来。

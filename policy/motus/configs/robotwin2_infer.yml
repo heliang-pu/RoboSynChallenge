@@ -1,0 +1,53 @@
+# Motus model config matching the released motus-robotics/Motus_robotwin2
+# checkpoint. Byte-for-byte equivalent to the upstream
+# Motus/inference/robotwin/Motus/utils/robotwin.yml — do not retune it, the
+# checkpoint's action_expert buffers are sized from these numbers.
+#
+#   action_chunk_size = 8 * 2 = 16, spaced global_downsample_rate=3 frames apart.
+#   Deploy this config with action_repeat: 3 so the chunk covers the same wall
+#   time it did during RoboTwin training.
+#
+# Zero-shot use on RoboSynChallenge is a sanity check only: the checkpoint was
+# trained on the RoboTwin2 aloha-agilex embodiment, whose gripper channel spans
+# 0..1 rather than the challenge's 0..0.05. See README_INTEGRATION.md.
+
+common:
+  action_dim: 14
+  state_dim: 14
+
+  num_video_frames: 8
+  video_height: 384
+  video_width: 320
+
+  global_downsample_rate: 3
+  video_action_freq_ratio: 2
+
+model:
+  wan:
+    precision: "bfloat16"
+
+  action_expert:
+    hidden_size: 1024
+    ffn_dim_multiplier: 4
+    norm_eps: 1e-5
+
+  und_expert:
+    hidden_size: 512
+    ffn_dim_multiplier: 4
+    norm_eps: 1e-5
+    vlm:
+      input_dim: 2048
+      projector_type: "mlp3x_silu"
+
+  time_distribution:
+    timestep_sample_method: "logi_normal"
+    sigmoid_scale: 1.0
+    min_t: 0.0
+    max_t: 1.0
+
+  inference:
+    num_inference_timesteps: 10
+
+  loss_weights:
+    video_loss_weight: 1.0
+    action_loss_weight: 1.0

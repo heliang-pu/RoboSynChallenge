@@ -217,3 +217,11 @@ eval_result/
 
 **/results/
 .codex
+
+# 训练数据与备份文件（体积大 / 无价值，勿入版本库）
+training_data/
+*.bak-*
+*.fixed
+*.orig
+cache/
+.hf_home/

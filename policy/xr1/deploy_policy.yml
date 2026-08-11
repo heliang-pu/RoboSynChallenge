@@ -1,0 +1,57 @@
+# XR-1 (Xiaomi-Robotics-1) Policy Evaluation Configuration
+# python scripts/eval_policy.py --config policy/xr1/deploy_policy.yml
+
+# ------------------------------------------------------------------
+# Basic experiment configuration (Each policy must be retained.)
+# ------------------------------------------------------------------
+policy_name: xr1
+task_name: null
+setting: null
+model_name: null
+seed: 0
+max_episodes: 20
+max_steps: 1000 # Maximum environment steps per episode. Effective limit is max(deploy_config.max_steps, gym_config.max_episode_steps).
+headless: false
+pytorch_device: cuda
+filter_dataset_saving: true
+eval_video_log: true
+eval_video_obs_key: cam_high
+
+# ------------------------------------------------------------------
+# Add policy-related parameters you needing, used for get_model()
+# ------------------------------------------------------------------
+train_config_name: null
+
+# 权重解析优先级: model_path > checkpoints/<train_config_name>/<model_name> > pretrained_ckpt
+model_path: null
+pretrained_ckpt: /home/phl/workspace/models/xr1/Xiaomi-Robotics-1-5B/model_states.pt
+
+# XR-1 的 VLM 骨架，必须是本地可用的 Qwen3-VL-4B-Instruct 目录
+backbone_path: /home/phl/workspace/models/backbones/Qwen3-VL-4B-Instruct
+
+# XR-1 源码位置（含 mibot 包），留空则用 policy/xr1/Xiaomi-Robotics-1/xr1
+xr1_repo: null
+
+# 打包动作的 mean/std 与打包状态的 q01/q99；由 convert_lerobot_to_xr1.py 生成。
+# 留空则回退到官方 demo 的 load_washer.yaml —— 只能验证链路，动作语义无意义。
+stats_path: null
+
+# 每次推理执行多少步（模型 horizon 是 30 步 @ 25fps = 1.2s）
+xr1_step: 10
+
+# auto = 有 flash-attn 就用，没有自动退回 sdpa
+attn_implementation: auto
+
+# 动作解码方式，auto = 跟随 stats 里记录的训练编码（推荐，避免配错）
+#   eef_ik = 模型输出末端增量 -> 积分成绝对末端目标 -> EmbodiChain compute_ik 逐步解
+#   slot   = 槽位复用编码，直接把增量加到关节上，不需要 IK
+decode_mode: auto
+
+# eef_ik 解码时，IK 解不出来就把目标按这些比例向锚点位姿收缩后重试。
+# 锚点必然可达，所以收缩总能落地。实测失败率 20.4% -> 5.2%（10 集，目标误差 0.03 量级）。
+# 设为 [] 关闭。另两个方案实测无效：改锚点种子重试、SVD 重正交化，都是 20.4%。
+ik_shrink_retry: [0.5, 0.25, 0.1]
+
+# 每步关节增量的安全上限（弧度）；null 表示不限制。
+# 零样本跑通链路时建议设 0.2 左右，避免未微调的模型把仿真打飞。
+max_joint_delta: null

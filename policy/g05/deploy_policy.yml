@@ -1,0 +1,68 @@
+# G0.5 (Galaxea GalaxeaVLA) Policy Evaluation Configuration
+# python scripts/eval_policy.py --config policy/g05/deploy_policy.yml
+
+# ------------------------------------------------------------------
+# Basic experiment configuration (Each policy must be retained.)
+# ------------------------------------------------------------------
+policy_name: g05
+task_name: null
+setting: null
+model_name: null
+seed: 0
+max_episodes: 20
+max_steps: 1000 # Maximum environment steps per episode. Effective limit is max(deploy_config.max_steps, gym_config.max_episode_steps).
+headless: false
+pytorch_device: cuda
+filter_dataset_saving: true
+eval_video_log: true
+eval_video_obs_key: cam_high
+
+# ------------------------------------------------------------------
+# Add policy-related parameters you needing, used for get_model()
+# ------------------------------------------------------------------
+
+# model_state_dict.pt 的路径。目录布局必须是官方约定的:
+#   <run_dir>/checkpoints/model_state_dict.pt
+#   <run_dir>/.hydra/config.yaml      <- 模型结构 + action tokenizer 配置从这里读
+#   <run_dir>/dataset_stats.json      <- 归一化统计量（也可放在更上层）
+# OpenGalaxea/G05 是 gated 仓库，下载步骤见 README_INTEGRATION.md
+ckpt_path: policy/g05/GalaxeaVLA/checkpoints/g05-base/checkpoints/model_state_dict.pt
+
+# 归一化统计量。留空则从 ckpt 逐级往上找 dataset_stats.json
+dataset_stats_path: null
+
+# 单次推理产出的动作 chunk 长度。留空 = 用模型自带 horizon（robotwin 配置是 32）
+action_horizon: null
+
+# 每次推理后实际执行多少步再重新推理。官方 robotwin 默认 8~24，
+# G0.5 官方文档的 action_steps 是 16，这里取 16。调小更贴合闭环、更慢。
+replan_steps: 16
+
+# 流匹配去噪步数。留空 = 用 checkpoint 里的配置（g05 默认 10）
+num_inference_steps: null
+
+# 喂给 action tokenizer 的控制频率。比赛 LeRobot 数据是 25fps，
+# 若直接用官方 g05-robotwin20 权重零样本评估，改成 15.0 更贴近其训练设置。
+control_frequency: 25.0
+
+# 推理精度: no / fp16 / bf16
+mixed_precision: bf16
+
+# Hydra 配置组装入口。三者都指同一个 embodiment 名字。
+#
+# 默认 robomindv2_Agilex 是为了能拿 g05-base **零样本**直接跑：
+# 它的 shape_meta 和比赛一样是 14 维双臂（left_arm 6 / left_gripper 1 /
+# right_arm 6 / right_gripper 1），而且 g05-base 的 dataset_stats.json 里**有**
+# 这个 embodiment 的归一化统计量（Agilex 正是比赛机器人 CobotMagic 的厂商）。
+# 换成 robotwin/cobotmagic 会因为 stats 里没有对应 key 而报错。
+#
+# 微调之后改成微调时用的名字（配置由 convert_lerobot_to_g05.py --embodiment 生成）:
+#   sim_task: cobotmagic
+#   embodiment: cobotmagic
+#
+# g05-base 的 stats 里可零样本复用的 14 维双臂 embodiment 共 8 个:
+#   bimanual_yam / galaxea_r1lite / robocoin_r1lite_1 / robocoin_r1lite_2 /
+#   robocoin_split_aloha / robomindv2_Agilex / robomindv2_Ark / robomindv2_UR5
+sim_cfg_name: sim_robotwin
+sim_task: robomindv2_Agilex
+embodiment: robomindv2_Agilex

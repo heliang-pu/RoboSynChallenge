@@ -26,7 +26,7 @@ import os
 
 class PI0:
 
-    def __init__(self, train_config_name, model_name, checkpoint_id, pi0_step):
+    def __init__(self, train_config_name, model_name, checkpoint_id, pi0_step, pytorch_device="cuda"):
         self.train_config_name = train_config_name
         self.model_name = model_name
         self.checkpoint_id = checkpoint_id
@@ -39,7 +39,7 @@ class PI0:
         self.policy = _policy_config.create_trained_policy(
             config,
             f"policy/pi05/checkpoints/{self.train_config_name}/{self.model_name}/{self.checkpoint_id}",
-            robotwin_repo_id=assets_id,
+            pytorch_device=pytorch_device,
             )
         print("loading model success!")
         self.img_size = (224, 224)
@@ -63,17 +63,11 @@ class PI0:
             img_arr[2],
             state,
         )
-        img_front = np.transpose(img_front, (2, 0, 1))
-        img_right = np.transpose(img_right, (2, 0, 1))
-        img_left = np.transpose(img_left, (2, 0, 1))
-
         self.observation_window = {
-            "state": state,
-            "images": {
-                "cam_high": img_front,
-                "cam_left_wrist": img_left,
-                "cam_right_wrist": img_right,
-            },
+            "observation/image": img_front,
+            "observation/left_wrist_image": img_left,
+            "observation/right_wrist_image": img_right,
+            "observation/state": state,
             "prompt": self.instruction,
         }
 

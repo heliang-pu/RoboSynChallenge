@@ -114,6 +114,7 @@
                 "mode": "interval",
                 "interval_step": 10,
                 "params": {
+                    "fallback_to_new": true,
                     "entity_cfg": {"uid": "default_plane"},
                     "random_texture_prob": 0.5,
                     "texture_path": "assets/background_texture/100",

@@ -1,0 +1,9 @@
+[submodule "policy/g05/GalaxeaVLA"]
+	path = policy/g05/GalaxeaVLA
+	url = https://github.com/OpenGalaxea/GalaxeaVLA
+[submodule "policy/motus/Motus"]
+	path = policy/motus/Motus
+	url = https://github.com/thu-ml/Motus
+[submodule "policy/xr1/Xiaomi-Robotics-1"]
+	path = policy/xr1/Xiaomi-Robotics-1
+	url = https://github.com/XiaomiRobotics/Xiaomi-Robotics-1
