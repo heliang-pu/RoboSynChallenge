@@ -117,14 +117,12 @@ def eval(env, model, obs):
         final_obs, reward, terminated, truncated, info = env.step(action_tensor)
         # The `gym_config` setting configures the `actionmanager` to support delta action input;
         # the default action must be absolute `qpos`.
-        _trunc = truncated.any() if hasattr(truncated, "any") else truncated
-        if bool(_trunc):
-            break
+
         # Update observation window after each step
         img_arr, state = encode_obs(final_obs)
         model.update_observation_window(img_arr, state)
 
-    return final_obs, info, truncated
+    return final_obs, info
 def reset_model(model):
     """Reset π₀ internal state (observation window and instruction)."""
     model.reset_obsrvationwindows()
