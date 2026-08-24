@@ -38,7 +38,7 @@ bash launch/run_sim_recap_round.sh click_bell random \
 | 阶段 | 做什么 | 产物 |
 |---|---|---|
 | 1 | π_k 无头 rollout N 集,自动记录成败 | `work/rollout_v30/` + `episode_success.json` 边车 |
-| 2 | 专家数据准备:v2.1 复制后上转 v3.0(原数据不动),v3.0 直接软链 | `work/expert_v30/` |
+| 2 | 专家数据准备:v2.1 复制后上转 v3.0(按源数据指纹缓存,同一份数据只转一次,后续轮秒级软链),v3.0 直接软链 | `work/expert_v30/` |
 | 3 | 专家 + rollout 合并(顺序固定:专家在前) | `work/merged_v30/` |
 | 4 | 写 `episode_success` 列进 meta/episodes(前缀带边车时按边车,否则全 success) | 同上(带标签) |
 | 5 | 训练 pistar06 价值函数 | `outputs/value_train/value_<task>_<tag>/` |

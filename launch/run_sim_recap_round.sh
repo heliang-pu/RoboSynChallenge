@@ -45,7 +45,8 @@
 #   5,6        Evo-RL 环境(见 run_value_train.sh 头部说明)
 #
 # 磁盘提示:阶段 2 对 v2.1 专家数据做整份复制后上转(不动原数据),
-# 1000 集带视频约需同等体量的临时空间;round2 起复用上轮合并池可避免。
+# 结果按源数据指纹缓存在 .simrecap_work/_cache/ 下跨轮复用——同一份
+# 专家数据只转一次,之后各轮秒级软链;源数据更新后自动重建。
 #
 # 完成后启动 ACP 微调(阶段 8,手动):
 #   1) 若 task/round 与 config 中 pi05_sim_recap 的默认值不同,编辑
@@ -122,10 +123,27 @@ if [[ "$START_STAGE" -le 2 ]]; then
     EXPERT_VERSION="$(dataset_version "$EXPERT_DATASET")"
     case "$EXPERT_VERSION" in
         v2.1)
-            echo "专家数据是 v2.1,复制到工作区并上转 v3.0(原数据不动)..."
-            cp -r "$EXPERT_DATASET" "$EXPERT_V30_DIR"
-            "$SIM_PYTHON" -m lerobot.datasets.v30.convert_dataset_v21_to_v30 \
-                --repo-id "$EXPERT_V30_ID" --root "$WORK_ROOT" --push-to-hub false
+            # 上转结果按源数据指纹缓存,跨轮次复用:同一份专家数据只复制/
+            # 转换一次,后续轮直接软链(源数据一变指纹即变,自动重建)。
+            CACHE_ROOT="$DATASET_ROOT/.simrecap_work/_cache"
+            FP="$("$SIM_PYTHON" -c "
+import hashlib, os
+p = os.path.realpath('$EXPERT_DATASET')
+print(hashlib.sha1((p + open(p + '/meta/info.json').read()).encode()).hexdigest()[:16])")"
+            CACHE_DIR="$CACHE_ROOT/expert_v30_$FP"
+            if [[ -f "$CACHE_DIR/.fingerprint" ]]; then
+                echo "命中缓存: $CACHE_DIR(专家数据未变,跳过复制与上转)"
+            else
+                echo "缓存未命中,复制并上转 v3.0(仅首次,原数据不动)..."
+                rm -rf "$CACHE_DIR"
+                mkdir -p "$CACHE_ROOT"
+                cp -r "$EXPERT_DATASET" "$CACHE_DIR"
+                "$SIM_PYTHON" -m lerobot.datasets.v30.convert_dataset_v21_to_v30 \
+                    --repo-id "expert_v30_$FP" --root "$CACHE_ROOT" --push-to-hub false
+                # 转换完整结束才落指纹;中途崩溃的半成品下次自动重建
+                echo "$FP" > "$CACHE_DIR/.fingerprint"
+            fi
+            ln -sfn "$CACHE_DIR" "$EXPERT_V30_DIR"
             ;;
         v3*)
             echo "专家数据已是 v3.0,直接软链进工作区"
