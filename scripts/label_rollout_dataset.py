@@ -57,8 +57,16 @@ def load_info(dataset_root: Path) -> dict:
     return info
 
 
+def read_sidecar_records(path: Path) -> list[dict]:
+    with open(path) as f:
+        return json.load(f).get("episodes", [])
+
+
 def load_labels_from_sidecar(
-    sidecar_path: Path, total_episodes: int, prefix_success: int = 0
+    sidecar_path: Path,
+    total_episodes: int,
+    prefix_success: int = 0,
+    prefix_labels: dict[int, str] | None = None,
 ) -> dict[int, str]:
     if not sidecar_path.exists():
         fail(
@@ -86,9 +94,19 @@ def load_labels_from_sidecar(
             f"与边车标签条数 {len(episodes)} 不一致"
         )
 
-    # 合并数据集布局: [0, prefix_success) 是专家 episode(全 success),
+    # 合并数据集布局: [0, prefix_success) 是前缀数据集的 episode,
     # 之后依次是 rollout episode(边车 index + 偏移)。
-    labels: dict[int, str] = {i: SUCCESS for i in range(prefix_success)}
+    # 前缀标签: 纯专家数据全 success;若前缀本身是上一轮的合并池
+    # (混有失败集),由 prefix_labels 显式给出。
+    if prefix_labels is None:
+        labels: dict[int, str] = {i: SUCCESS for i in range(prefix_success)}
+    else:
+        if sorted(prefix_labels) != list(range(prefix_success)):
+            fail(
+                f"前缀边车覆盖 {len(prefix_labels)} 个 episode,"
+                f"与前缀数据集的 {prefix_success} 个不一致"
+            )
+        labels = dict(prefix_labels)
     for rec in episodes:
         idx = int(rec["episode_index"]) + prefix_success
         if idx in labels and idx >= prefix_success:
@@ -154,6 +172,12 @@ def main() -> None:
         help="合并数据集用:前 N 个 episode 是专家数据(全 success),"
         "其余按边车标签对齐(边车 index + N)",
     )
+    parser.add_argument(
+        "--prefix-sidecar",
+        default=None,
+        help="前缀部分不是纯专家而是上一轮合并池时,给出它的 episode_success.json,"
+        "前缀标签按此文件而非全 success",
+    )
     args = parser.parse_args()
 
     dataset_root = Path(args.dataset).expanduser().resolve()
@@ -171,8 +195,18 @@ def main() -> None:
         if args.sidecar
         else dataset_root / "episode_success.json"
     )
+    prefix_labels = None
+    if args.prefix_sidecar:
+        prefix_labels = {
+            int(rec["episode_index"]): (SUCCESS if rec["success"] else FAILURE)
+            for rec in read_sidecar_records(Path(args.prefix_sidecar))
+        }
+
     labels = load_labels_from_sidecar(
-        sidecar_path, total_episodes, prefix_success=max(0, args.prefix_success)
+        sidecar_path,
+        total_episodes,
+        prefix_success=max(0, args.prefix_success),
+        prefix_labels=prefix_labels,
     )
     write_labels(dataset_root, labels)
 

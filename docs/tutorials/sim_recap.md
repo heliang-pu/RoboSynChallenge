@@ -19,6 +19,13 @@ RL 被拆成三个监督学习问题,全程离线、稳定,不改一行模型结
 关键设计:数据池必须同时含**成功与失败的 rollout** + 专家数据。若失败样本只来自
 rollout、成功样本只来自专家,价值函数会学到"辨认动作风格"的捷径而不是任务成败。
 
+## 数据版本约定:对外统一 v2.1
+
+专家数据给 v2.1(v3.0 也接受),最终产物是 v2.1。价值函数栈(Evo-RL)只认
+v3.0,所以 v3.0 只作为**内部中间产物**存在于隐藏工作目录
+`lerobot_dataset/.simrecap_work/<task>_<tag>/`,阶段 7 转回 v2.1 发布,
+对外目录里永远只有 v2.1。
+
 ## 一轮闭环(一条命令)
 
 ```bash
@@ -26,16 +33,21 @@ bash launch/run_sim_recap_round.sh click_bell random \
      pi05_base_robosynchallenge_full click_bell round1 200 0
 ```
 
-六个阶段自动串联(`START_STAGE=N` 可断点续跑):
+七个阶段自动串联(`START_STAGE=N` 可断点续跑;下文 `work/` 指隐藏工作目录):
 
 | 阶段 | 做什么 | 产物 |
 |---|---|---|
-| 1 | π_k 无头 rollout N 集,自动记录成败 | `lerobot_dataset/rollouts/<task>_<setting>_<tag>/` + `episode_success.json` 边车 |
-| 2 | 专家 + rollout 合并(顺序固定:专家在前) | `lerobot_dataset/simrecap_<task>_<tag>/`(v3.0) |
-| 3 | 写 `episode_success` 列进 meta/episodes | 同上(带标签) |
-| 4 | 训练 pistar06 价值函数 | `outputs/value_train/value_<task>_<tag>/` |
-| 5 | 逐帧 value/advantage/indicator 写回数据集 | `complementary_info.acp_indicator_<tag>` 列 |
-| 6 | 转 v2.1(校验 indicator 存活)并链接进 pi05 训练目录 | `policy/pi05/training_data/RoboSynChallenge/simrecap_<task>_<tag>` |
+| 1 | π_k 无头 rollout N 集,自动记录成败 | `work/rollout_v30/` + `episode_success.json` 边车 |
+| 2 | 专家数据准备:v2.1 复制后上转 v3.0(原数据不动),v3.0 直接软链 | `work/expert_v30/` |
+| 3 | 专家 + rollout 合并(顺序固定:专家在前) | `work/merged_v30/` |
+| 4 | 写 `episode_success` 列进 meta/episodes(前缀带边车时按边车,否则全 success) | 同上(带标签) |
+| 5 | 训练 pistar06 价值函数 | `outputs/value_train/value_<task>_<tag>/` |
+| 6 | 逐帧 value/advantage/indicator 写回数据集 | `complementary_info.acp_indicator_<tag>` 列 |
+| 7 | 导出标签边车 → 转 v2.1(校验 indicator 存活)→ 发布 | `lerobot_dataset/simrecap_<task>_<tag>/`(v2.1,含边车),并链接进 pi05 训练目录 |
+
+标签的跨轮传递:发布的 v2.1 数据池自带 `episode_success.json` 边车
+(v2.1 的 meta 不保留自定义列)。下一轮把它当 `expert_dataset` 时,
+阶段 4 自动改用这个边车恢复逐集标签——上轮池子里的失败集不会被错标成 success。
 
 然后按脚本末尾提示做 ACP 微调(阶段 7):
 
@@ -61,10 +73,10 @@ bash policy/pi05/finetune.sh pi05_sim_recap click_bell_round1 0
 
 ## 环境
 
-- 阶段 1/2/3/6:仿真环境(conda `robosyn` 或根目录 `.venv`,lerobot 0.4.4 + pyarrow)
-- 阶段 4/5:Evo-RL 环境——`cd third_party/evo_rl && uv venv --python 3.10 && uv pip install -e .`,
+- 阶段 1/2/3/4/7:仿真环境(conda `robosyn` 或根目录 `.venv`,lerobot 0.4.4 + pyarrow)
+- 阶段 5/6:Evo-RL 环境——`cd third_party/evo_rl && uv venv --python 3.10 && uv pip install -e .`,
   或复用已有 conda `evo-rl` 环境(脚本会用 `PYTHONPATH` 保证跑的是收编代码)
-- 阶段 7:pi0.5 的 uv 环境(不变)
+- 阶段 8(ACP 微调):pi0.5 的 uv 环境(不变)
 
 ## 经验参数
 
