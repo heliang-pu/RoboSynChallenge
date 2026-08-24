@@ -54,6 +54,7 @@ RoboSynChallenge/
 │   ├── pi0/  pi05/       #   openpi JAX 栈(uv 项目)
 │   ├── dm05/ g05/ motus/ xr1/   # 各自的环境搭建脚本
 │   └── Your_Policy/      #   接入自定义策略的模板
+├── third_party/          # 收编的外部依赖(evo_rl:sim-RECAP 价值函数栈)
 ├── lerobot_dataset/      # 本地采集的数据默认落在这里
 ├── evaluation_results/   # 已发布 ACT/DP checkpoint 的百集评估结果(机器可读)
 ├── report/               # pi0.5 官方协议评估报告(random×100)

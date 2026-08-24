@@ -315,3 +315,23 @@ python RoboSynChallenge/scripts/analyze_rigid_spawn_range.py \
 ---
 
 如需补充更多脚本说明，请补充到本 README。
+
+---
+
+## label_rollout_dataset.py
+
+**用途**：
+sim-RECAP 数据桥接：把 rollout 采集产出的 `episode_success.json` 边车标签写入
+LeRobot v3.0 数据集 `meta/episodes` 的 parquet（`episode_success` 列，
+"success"/"failure"），供价值函数训练使用。任何一致性校验失败即非零退出。
+
+**使用方法**：
+```bash
+# rollout 数据集(默认读 <dataset>/episode_success.json)
+python scripts/label_rollout_dataset.py --dataset <dataset_dir>
+# 专家数据集整体打成 success
+python scripts/label_rollout_dataset.py --dataset <dataset_dir> --constant success
+# 合并数据集:前 N 集为专家(或上轮池,配 --prefix-sidecar),其余按边车
+python scripts/label_rollout_dataset.py --dataset <merged> --prefix-success N \
+    --sidecar <rollout>/episode_success.json [--prefix-sidecar <prev_pool>/episode_success.json]
+```

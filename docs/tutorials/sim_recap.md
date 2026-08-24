@@ -49,7 +49,7 @@ bash launch/run_sim_recap_round.sh click_bell random \
 (v2.1 的 meta 不保留自定义列)。下一轮把它当 `expert_dataset` 时,
 阶段 4 自动改用这个边车恢复逐集标签——上轮池子里的失败集不会被错标成 success。
 
-然后按脚本末尾提示做 ACP 微调(阶段 7):
+然后按脚本末尾提示做 ACP 微调(阶段 8):
 
 ```bash
 # config.py 的 pi05_sim_recap 中确认 repo_id / acp_indicator_key / weight_loader
@@ -59,6 +59,42 @@ bash policy/pi05/finetune.sh pi05_sim_recap click_bell_round1 0
 训完直接评估——推理链路会自动给 prompt 追加 `Advantage: positive`,不需要
 改 deploy 配置。下一轮把 `round_tag` 递增、`weight_loader` 指向新 checkpoint、
 `expert_dataset` 换成本轮合并池,数据池随迭代滚雪球。
+
+## 单独采集 rollout(不跑完整闭环)
+
+只想录一批带成败标签的 rollout 数据时,直接用 eval.sh:
+
+```bash
+cd policy/pi05
+bash eval.sh sample_loading random_rollout pi05_sample_loading sample_loading 0 \
+    --checkpoint_id 28000 --max_episodes 100 --headless True \
+    --rollout_save True --rollout_save_path lerobot_dataset/my_rollout \
+    --eval_video_log False
+```
+
+- 数据集落在 `<save_path>/<robot>_<scene>_<task>_NNN/`(记录器自动建子目录),
+  `episode_success.json` 边车在数据集目录内
+- 交付 v2.1:复制一份后用 `scripts/convert_lerobot3.0_to_2.1.py` 转换,
+  **转换器会丢弃非标准文件,转完记得把边车复制回去**
+
+## 采集设置与评测设置分离
+
+评测必须用官方 `random`;采集可以用任务专属的 `random_<用途>` 设置排除
+无解场景。已有示例:`configs/sample_loading/random_rollout/` 把试管出生范围
+收窄到不会贴住架子(官方范围最坏情况两者直接接触,episode 无解,只产生
+无信息量的失败样本;几何依据见该目录 README)。新任务照此模式复制官方
+random 配置后微调即可,**不要改官方 random 本身**。
+
+## 运维注意
+
+- **中途停止 rollout**:记录器会 spawn image-writer 子进程,只杀主进程会留下
+  孤儿进程拖住 20+GB CUDA 上下文不释放(表现为进程消失但 nvidia-smi 仍记账)。
+  正确做法:`pgrep -af eval_policy` 找全 PID 一起 kill,再确认显存归零。
+- **显存预算**:pi0.5 评估会按 `XLA_PYTHON_CLIENT_MEM_FRACTION=0.4` 预分配约
+  20GB(48G 卡),启动前确认空闲显存足够,否则 JAX 直接 OOM。
+- **一集时长**:sample_loading 失败集跑满 600 步(任务注册的
+  `max_episode_steps=600` 压过配置里的数值),GPU 无争用时约 4-7 分钟/集,
+  估算大批量采集时长要按失败集为主计算。
 
 ## 各组件位置
 
