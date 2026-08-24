@@ -1,3 +1,36 @@
+# =============================================================================
+# RoboSynChallenge 根包配置
+# =============================================================================
+#
+# !! 全部环境用 uv 管理,且刻意不提供"一把梭"的统一环境 ——
+# !! 用哪个 policy 就装哪个,互不污染 !!
+#
+# 环境分层(详见 SETUP.md 与 README):
+#
+#   1. 仿真/采集/评估环境(仓库根目录,uv venv)
+#        uv venv --python 3.11
+#        uv pip install -r requirements.txt       # 精确锁定的仿真依赖
+#        uv pip install -e . --no-deps            # 本包(robosynchallenge)
+#        uv pip install -e ../EmbodiChain --no-deps # 仿真框架,需与本仓库同级 clone
+#      其中 dexsim-engine 是闭源仿真引擎,走私有 pip 源,需要分发权限。
+#
+#   2. 各 policy 训练环境(独立 uv 项目,按需安装)
+#        policy/act/    policy/dp/     —— LeRobot 栈(torch)
+#        policy/pi0/    policy/pi05/   —— openpi 栈(JAX)
+#      每个目录自带 pyproject.toml + uv.lock:
+#        cd policy/<名字> && uv sync               # 只装训练依赖
+#        cd policy/<名字> && uv sync --extra sim   # 追加仿真评估依赖
+#      各自的 finetune.sh 用 `uv run --frozen` 启动,首次运行自动建环境,
+#      不需要手动 uv sync。
+#
+#   3. 其余 policy(dm05 / g05 / motus / xr1)依赖树庞大且带自编译组件,
+#      各自的 setup_env.sh / README 说明了环境搭建方式。
+#
+# 本文件只定义 `robosynchallenge` 这个 Python 包(任务配置、脚本、评估协议),
+# 运行时依赖刻意为空:它被上面 1、2 两类环境以可编辑方式安装,
+# 依赖由宿主环境提供,避免在这里引入版本冲突。
+# =============================================================================
+
 [project]
 name = "robosynchallenge"
 description = "Template repository for building Embodied AI task environment using EmbodiChain."
@@ -20,6 +53,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
+# 刻意为空,见文件头说明
 dependencies = [
 ]
 
@@ -35,6 +69,7 @@ where = ["."]
 exclude = ["docs"]
 
 [tool.setuptools.dynamic]
-version = { file = ["RoboSynChallenge/VERSION"] }
+# 注意路径是小写的包目录(原先写成 RoboSynChallenge/VERSION 是错的)
+version = { file = ["robosynchallenge/VERSION"] }
 
 [tool.black]
