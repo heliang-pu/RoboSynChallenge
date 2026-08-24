@@ -393,6 +393,12 @@ class LeRobotEmbodiChainDataConfig(DataConfigFactory):
 
     extra_delta_transform: bool = False
     action_sequence_keys: Sequence[str] = ("action",)
+    # sim-RECAP / ACP(优势条件化):指向 value-infer 写回的 0/1 indicator 列,
+    # 例如 "complementary_info.acp_indicator_round1"。设置后训练时把
+    # "Advantage: positive/negative" 追加进 prompt(带 dropout),推理时自动
+    # 追加 positive 标签;为 None 时行为与原始配置完全一致。
+    acp_indicator_key: str | None = None
+    acp_tag_dropout: float = 0.3
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
         # The repack transform is *only* applied to the data coming from the dataset,
@@ -403,26 +409,25 @@ class LeRobotEmbodiChainDataConfig(DataConfigFactory):
         # For your own dataset, first figure out what keys your environment passes to the policy server
         # and then modify the mappings below so your dataset's keys get matched to those target keys.
         # The repack transform simply remaps key names here.
-        repack_transform = _transforms.Group(
-            inputs=[
-                _AliasRepackTransform(
-                    {
-                        "observation/image": ("observation.images.cam_high", "cam_high.color"),
-                        "observation/left_wrist_image": (
-                            "observation.images.cam_left_wrist",
-                            "cam_left_wrist.color",
-                        ),
-                        "observation/right_wrist_image": (
-                            "observation.images.cam_right_wrist",
-                            "cam_right_wrist.color",
-                        ),
-                        "observation/state": ("observation.state", "observation.qpos"),
-                        "actions": ("action",),
-                        "prompt": ("prompt",),
-                    }
-                )
-            ]
-        )
+        repack_structure = {
+            "observation/image": ("observation.images.cam_high", "cam_high.color"),
+            "observation/left_wrist_image": (
+                "observation.images.cam_left_wrist",
+                "cam_left_wrist.color",
+            ),
+            "observation/right_wrist_image": (
+                "observation.images.cam_right_wrist",
+                "cam_right_wrist.color",
+            ),
+            "observation/state": ("observation.state", "observation.qpos"),
+            "actions": ("action",),
+            "prompt": ("prompt",),
+        }
+        if self.acp_indicator_key is not None:
+            # 硬性要求:开了 ACP 的数据集必须带 indicator 列,缺失时
+            # _AliasRepackTransform 会直接报错,避免静默训成全 positive。
+            repack_structure["acp_indicator"] = (self.acp_indicator_key,)
+        repack_transform = _transforms.Group(inputs=[_AliasRepackTransform(repack_structure)])
 
         # The data transforms are applied to the data coming from the dataset *and* during inference.
         # Below, we define the transforms for data going into the model (``inputs``) and the transforms
@@ -430,8 +435,15 @@ class LeRobotEmbodiChainDataConfig(DataConfigFactory):
         # We defined these transforms in `libero_policy.py`. You can check the detailed comments there for
         # how to modify the transforms to match your dataset. Once you created your own transforms, you can
         # replace the transforms below with your own.
+        input_transforms = [libero_policy.EmbodiChainInputs(model_type=model_config.model_type)]
+        if self.acp_indicator_key is not None:
+            # 训练:indicator -> "Advantage: positive/negative" 文本标签(带 dropout);
+            # 推理:请求里没有 indicator,自动追加 positive 标签。
+            input_transforms.insert(
+                0, libero_policy.ACPAdvantageTag(dropout_prob=self.acp_tag_dropout)
+            )
         data_transforms = _transforms.Group(
-            inputs=[libero_policy.EmbodiChainInputs(model_type=model_config.model_type)],
+            inputs=input_transforms,
             outputs=[libero_policy.EmbodiChainOutputs()],
         )
 
@@ -913,6 +925,31 @@ _CONFIGS = [
         ),
         # pytorch_weight_path="/root/.cache/openpi/openpi-assets/checkpoints/pi05_base_torch",
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=20_000,
+        batch_size=64,
+        fsdp_devices=1,
+    ),
+    TrainConfig(
+        # sim-RECAP 示例配置:在带 advantage 标签的数据池上做 ACP 微调。
+        # 数据池 = 专家数据 + rollout 数据(成败混合),需先经过:
+        #   1) scripts/label_rollout_dataset.py  写 episode_success
+        #   2) launch/run_value_train.sh + run_value_infer.sh  写 indicator 列
+        #   3) scripts/convert_lerobot3.0_to_2.1.py  转成 openpi 可读的 v2.1
+        # 换任务/换轮次时改 repo_id 和 acp_indicator_key 的后缀即可。
+        name="pi05_sim_recap",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/simrecap_click_bell_round1",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+            acp_indicator_key="complementary_info.acp_indicator_round1",
+            acp_tag_dropout=0.3,
+        ),
+        # 迭代式训练:从上一轮微调好的 checkpoint 继续,而不是从 pi05_base。
+        # 首轮可换回 gs://openpi-assets/checkpoints/pi05_base/params。
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "./checkpoints/pi05_base_robosynchallenge_full/click_bell/19999/params"
+        ),
         num_train_steps=20_000,
         batch_size=64,
         fsdp_devices=1,
