@@ -247,6 +247,16 @@ if __name__ == "__main__":
 
     env = gym.make(id=gym_config["id"], cfg=env_cfg, **action_config)
 
+    # Collection calls ``is_task_success`` once per episode, from inside
+    # ``BaseEnv.reset``; the evaluator in scripts/eval_policy.py calls it after
+    # every action chunk instead. A success check counting consecutive
+    # successful calls (sample_loading's ``success_stable_steps``) therefore
+    # counts episodes here and chunks there, and never settles during
+    # collection. Drop the hysteresis for collection only, leaving the task's
+    # official threshold untouched for evaluation.
+    if not hasattr(env.unwrapped, "success_stable_steps"):
+        env.unwrapped.success_stable_steps = 1
+
     try:
         run_env_main(args, env, gym_config=gym_config)
     except Exception as e:

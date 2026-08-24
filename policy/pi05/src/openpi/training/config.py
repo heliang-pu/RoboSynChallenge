@@ -355,6 +355,35 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
         )
 
 @dataclasses.dataclass(frozen=True)
+class _AliasRepackTransform(_transforms.DataTransformFn):
+    """Like ``RepackTransform``, but accepts several source spellings per target key.
+
+    The RoboSynChallenge datasets are published with two different key conventions:
+    ``cobotmagic_Sim_click_bell`` uses the legacy ``observation.qpos`` / ``cam_*.color``
+    names, while every other Sim dataset, all Real datasets and anything produced by
+    ``scripts/prepare_sim_real_cotrain.py`` use ``observation.state`` /
+    ``observation.images.cam_*``. Listing both keeps one config usable for all of them.
+    """
+
+    structure: dict[str, tuple[str, ...]]
+
+    def __call__(self, data: dict) -> dict:
+        flat_item = _transforms.flatten_dict(data)
+        out = {}
+        for target, candidates in self.structure.items():
+            for candidate in candidates:
+                if candidate in flat_item:
+                    out[target] = flat_item[candidate]
+                    break
+            else:
+                raise KeyError(
+                    f"None of {candidates} found in the dataset sample for '{target}'. "
+                    f"Available keys: {sorted(flat_item)}"
+                )
+        return out
+
+
+@dataclasses.dataclass(frozen=True)
 class LeRobotEmbodiChainDataConfig(DataConfigFactory):
     """
     This config is used to configure transforms that are applied at various parts of the data pipeline.
@@ -376,14 +405,20 @@ class LeRobotEmbodiChainDataConfig(DataConfigFactory):
         # The repack transform simply remaps key names here.
         repack_transform = _transforms.Group(
             inputs=[
-                _transforms.RepackTransform(
+                _AliasRepackTransform(
                     {
-                        "observation/image": "cam_high.color",
-                        "observation/left_wrist_image": "cam_left_wrist.color",
-                        "observation/right_wrist_image": "cam_right_wrist.color",
-                        "observation/state": "observation.qpos",
-                        "actions": "action",
-                        "prompt": "prompt",
+                        "observation/image": ("observation.images.cam_high", "cam_high.color"),
+                        "observation/left_wrist_image": (
+                            "observation.images.cam_left_wrist",
+                            "cam_left_wrist.color",
+                        ),
+                        "observation/right_wrist_image": (
+                            "observation.images.cam_right_wrist",
+                            "cam_right_wrist.color",
+                        ),
+                        "observation/state": ("observation.state", "observation.qpos"),
+                        "actions": ("action",),
+                        "prompt": ("prompt",),
                     }
                 )
             ]
@@ -870,6 +905,142 @@ _CONFIGS = [
         model=pi0_config.Pi0Config(pi05=True,action_horizon=50),
         data=LeRobotEmbodiChainDataConfig(
             repo_id="RoboSynChallenge/cobotmagic_Sim_sample_loading",
+            # Replace with your repo-id
+            base_config=DataConfig(prompt_from_task=True),
+            # EmbodiChain datasets are usually absolute-action targets.
+            # Keep this False unless your checkpoint expects extra delta conversion.
+            extra_delta_transform=True,
+        ),
+        # pytorch_weight_path="/root/.cache/openpi/openpi-assets/checkpoints/pi05_base_torch",
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=20_000,
+        batch_size=64,
+        fsdp_devices=1,
+    ),
+    TrainConfig(
+        name="pi05_water_pouring",
+        model=pi0_config.Pi0Config(pi05=True,action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/cobotmagic_Sim_water_pouring",
+            # Replace with your repo-id
+            base_config=DataConfig(prompt_from_task=True),
+            # EmbodiChain datasets are usually absolute-action targets.
+            # Keep this False unless your checkpoint expects extra delta conversion.
+            extra_delta_transform=True,
+        ),
+        # pytorch_weight_path="/root/.cache/openpi/openpi-assets/checkpoints/pi05_base_torch",
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=20_000,
+        batch_size=64,
+        fsdp_devices=1,
+    ),
+    TrainConfig(
+        name="pi05_mixer_operating",
+        model=pi0_config.Pi0Config(pi05=True,action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/cobotmagic_Sim_mixer_operating",
+            # Replace with your repo-id
+            base_config=DataConfig(prompt_from_task=True),
+            # EmbodiChain datasets are usually absolute-action targets.
+            # Keep this False unless your checkpoint expects extra delta conversion.
+            extra_delta_transform=True,
+        ),
+        # pytorch_weight_path="/root/.cache/openpi/openpi-assets/checkpoints/pi05_base_torch",
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=20_000,
+        batch_size=64,
+        fsdp_devices=1,
+    ),
+    TrainConfig(
+        name="pi05_manipulate_pipette",
+        model=pi0_config.Pi0Config(pi05=True,action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/cobotmagic_Sim_manipulate_pipette",
+            # Replace with your repo-id
+            base_config=DataConfig(prompt_from_task=True),
+            # EmbodiChain datasets are usually absolute-action targets.
+            # Keep this False unless your checkpoint expects extra delta conversion.
+            extra_delta_transform=True,
+        ),
+        # pytorch_weight_path="/root/.cache/openpi/openpi-assets/checkpoints/pi05_base_torch",
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=20_000,
+        batch_size=64,
+        fsdp_devices=1,
+    ),
+    TrainConfig(
+        name="pi05_handle_basket",
+        model=pi0_config.Pi0Config(pi05=True,action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/cobotmagic_Sim_handle_basket",
+            # Replace with your repo-id
+            base_config=DataConfig(prompt_from_task=True),
+            # EmbodiChain datasets are usually absolute-action targets.
+            # Keep this False unless your checkpoint expects extra delta conversion.
+            extra_delta_transform=True,
+        ),
+        # pytorch_weight_path="/root/.cache/openpi/openpi-assets/checkpoints/pi05_base_torch",
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=20_000,
+        batch_size=64,
+        fsdp_devices=1,
+    ),
+    TrainConfig(
+        name="pi05_items_handover",
+        model=pi0_config.Pi0Config(pi05=True,action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/cobotmagic_Sim_items_handover",
+            # Replace with your repo-id
+            base_config=DataConfig(prompt_from_task=True),
+            # EmbodiChain datasets are usually absolute-action targets.
+            # Keep this False unless your checkpoint expects extra delta conversion.
+            extra_delta_transform=True,
+        ),
+        # pytorch_weight_path="/root/.cache/openpi/openpi-assets/checkpoints/pi05_base_torch",
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=20_000,
+        batch_size=64,
+        fsdp_devices=1,
+    ),
+    TrainConfig(
+        name="pi05_item_assembly",
+        model=pi0_config.Pi0Config(pi05=True,action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/cobotmagic_Sim_item_assembly",
+            # Replace with your repo-id
+            base_config=DataConfig(prompt_from_task=True),
+            # EmbodiChain datasets are usually absolute-action targets.
+            # Keep this False unless your checkpoint expects extra delta conversion.
+            extra_delta_transform=True,
+        ),
+        # pytorch_weight_path="/root/.cache/openpi/openpi-assets/checkpoints/pi05_base_torch",
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=20_000,
+        batch_size=64,
+        fsdp_devices=1,
+    ),
+    TrainConfig(
+        name="pi05_drawer_open_place",
+        model=pi0_config.Pi0Config(pi05=True,action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/cobotmagic_Sim_drawer_open_place",
+            # Replace with your repo-id
+            base_config=DataConfig(prompt_from_task=True),
+            # EmbodiChain datasets are usually absolute-action targets.
+            # Keep this False unless your checkpoint expects extra delta conversion.
+            extra_delta_transform=True,
+        ),
+        # pytorch_weight_path="/root/.cache/openpi/openpi-assets/checkpoints/pi05_base_torch",
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=20_000,
+        batch_size=64,
+        fsdp_devices=1,
+    ),
+    TrainConfig(
+        name="pi05_table_rearrangement",
+        model=pi0_config.Pi0Config(pi05=True,action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/cobotmagic_Sim_table_rearrangement",
             # Replace with your repo-id
             base_config=DataConfig(prompt_from_task=True),
             # EmbodiChain datasets are usually absolute-action targets.
