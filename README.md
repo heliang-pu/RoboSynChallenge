@@ -310,5 +310,6 @@ cd policy/dm05 && bash eval.sh <task_name> <setting> ...
 | [docs/tutorials/domain_randomization.md](docs/tutorials/domain_randomization.md) | 域随机化机制 |
 | [docs/tutorials/configuration.md](docs/tutorials/configuration.md) | 配置文件字段说明 |
 | [docs/tutorials/policy/](docs/tutorials/policy/) | 各策略训练/评估教程 |
+| [docs/tutorials/sim_recap.md](docs/tutorials/sim_recap.md) | sim-RECAP:无人在回路的优势条件化迭代训练(价值函数 + ACP) |
 | [launch/README.md](launch/README.md) | 采集/回放/可视化脚本手册 |
 | [scripts/README.md](scripts/README.md) | 数据集工具手册 |
