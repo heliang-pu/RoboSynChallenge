@@ -27,7 +27,8 @@ shift 5 2>/dev/null || true
 EXTRA_ARGS=("$@")
 
 export CUDA_VISIBLE_DEVICES="$GPU_ID"
-export XLA_PYTHON_CLIENT_MEM_FRACTION=0.4
+# 显存池比例可被外部覆盖(并行分片 rollout 时每片调小)
+export XLA_PYTHON_CLIENT_MEM_FRACTION="${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.4}"
 
 
 echo "========================================="
@@ -46,6 +47,19 @@ export PI0_VENV_DIR="$VENV_DIR"
 export PYTHONPATH="$REPO_ROOT:$REPO_ROOT/policy:$SCRIPT_DIR/src:$SCRIPT_DIR/packages/openpi-client/src${PYTHONPATH:+:$PYTHONPATH}"
 if [[ -d "$EMBODICHAIN_ROOT" ]]; then
     export PYTHONPATH="$EMBODICHAIN_ROOT:$PYTHONPATH"
+fi
+
+# openpi pins LeRobot 0.1 for its legacy ``lerobot.common`` data API, whereas
+# EmbodiChain rollout recording needs the modern ``lerobot.datasets`` API.
+# Point the recorder compatibility bridge at the existing robosyn environment
+# without replacing the version imported by openpi.
+if [[ -z "${LEROBOT_RECORDER_PACKAGE_ROOT:-}" ]]; then
+    for candidate in "$HOME"/miniconda3/envs/robosyn/lib/python*/site-packages/lerobot; do
+        if [[ -f "$candidate/datasets/lerobot_dataset.py" ]]; then
+            export LEROBOT_RECORDER_PACKAGE_ROOT="$candidate"
+            break
+        fi
+    done
 fi
 cd "$REPO_ROOT" # move to RoboSynChallenge root
 

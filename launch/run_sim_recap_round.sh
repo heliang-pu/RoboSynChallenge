@@ -159,9 +159,37 @@ fi
 if [[ "$START_STAGE" -le 3 ]]; then
     stage 3 "合并 $EXPERT_V30_ID + $ROLLOUT_DS_ID -> $MERGED_ID"
     [[ -e "$MERGED_DIR" ]] && { echo "错误: 合并输出已存在 $MERGED_DIR" >&2; exit 1; }
-    # 顺序必须是 [专家, rollout]:阶段 4 依赖"前 N 集是专家"的布局
-    "$SIM_PYTHON" -m lerobot.scripts.lerobot_edit_dataset \
-        --root "$WORK_ROOT" \
+    # 合并前先把两个输入数据集 parquet 里的 pandas/HF 扩展元数据剥成纯存储
+    # 类型(数值不变):记录器/上转器写入的扩展 dtype 会让 merge 的 pandas
+    # 读写路径在 pandas 2/3 下各自崩掉(实测)。幂等,可重复执行。
+    "$SIM_PYTHON" - <<PYEOF
+import glob
+import pyarrow as pa
+import pyarrow.parquet as pq
+n = 0
+for d in ["$EXPERT_V30_DIR", "$ROLLOUT_DS_DIR"]:
+    for f in sorted(glob.glob(f"{d}/meta/**/*.parquet", recursive=True)) + \
+             sorted(glob.glob(f"{d}/data/**/*.parquet", recursive=True)):
+        t = pq.read_table(f)
+        if not (t.schema.metadata or any(fld.metadata for fld in t.schema)):
+            continue
+        fields = [pa.field(fld.name, fld.type, fld.nullable) for fld in t.schema]
+        t2 = pa.Table.from_arrays([t.column(i) for i in range(t.num_columns)],
+                                  schema=pa.schema(fields))
+        pq.write_table(t2, f, compression="snappy")
+        n += 1
+print(f"[merge-prep] 已剥离 {n} 个 parquet 的扩展元数据")
+PYEOF
+
+    # 顺序必须是 [专家, rollout]:阶段 4 依赖"前 N 集是专家"的布局。
+    # 注意:LeRobotDataset 的 root 参数是"数据集目录本身",多数据集合并
+    # 不能用 --root(会把所有输入都指向同一目录),要用 HF_LEROBOT_HOME
+    # 作为解析根;合并用 pandas 2.x 的 Evo-RL 环境跑(pandas 3 读
+    # tasks.parquet 会崩)。
+    MERGE_PYTHON="$HOME/miniconda3/envs/evo-rl/bin/python"
+    [[ -x "$MERGE_PYTHON" ]] || MERGE_PYTHON="$SIM_PYTHON"
+    HF_LEROBOT_HOME="$WORK_ROOT" PYTHONPATH="$REPO_ROOT/third_party/evo_rl/src" \
+    "$MERGE_PYTHON" -m lerobot.scripts.lerobot_edit_dataset \
         --repo_id "$MERGED_ID" \
         --push_to_hub false \
         --operation.type merge \
