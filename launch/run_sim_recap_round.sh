@@ -103,8 +103,16 @@ if [[ "$START_STAGE" -le 1 ]]; then
         --headless True \
         --rollout_save True \
         --rollout_save_path "lerobot_dataset/.simrecap_work/${TASK}_${ROUND_TAG}/$ROLLOUT_ID")
-    [[ -f "$ROLLOUT_DIR/episode_success.json" ]] || { echo "错误: rollout 边车标签未生成" >&2; exit 1; }
 fi
+
+# 记录器会在 save_path 下再建 <robot>_<scene>_<task>_NNN 子目录,
+# 这里解析出真正的数据集目录(断点续跑时同样生效)。
+ROLLOUT_INFO="$(find "$ROLLOUT_DIR" -maxdepth 3 -path '*/meta/info.json' 2>/dev/null | head -1)"
+[[ -n "$ROLLOUT_INFO" ]] || { echo "错误: $ROLLOUT_DIR 下找不到 rollout 数据集(meta/info.json)" >&2; exit 1; }
+ROLLOUT_DS_DIR="$(dirname "$(dirname "$ROLLOUT_INFO")")"
+ROLLOUT_DS_ID="$(realpath --relative-to="$WORK_ROOT" "$ROLLOUT_DS_DIR")"
+[[ -f "$ROLLOUT_DS_DIR/episode_success.json" ]] || { echo "错误: rollout 边车标签未生成 ($ROLLOUT_DS_DIR)" >&2; exit 1; }
+echo "rollout 数据集: $ROLLOUT_DS_DIR"
 
 # ---------------- 阶段 2: 专家数据准备(v2.1 上转 v3.0 副本;v3.0 直接软链) ----------------
 if [[ "$START_STAGE" -le 2 ]]; then
@@ -131,7 +139,7 @@ fi
 
 # ---------------- 阶段 3: 合并专家 + rollout 成数据池(v3.0,工作区) ----------------
 if [[ "$START_STAGE" -le 3 ]]; then
-    stage 3 "合并 $EXPERT_V30_ID + $ROLLOUT_ID -> $MERGED_ID"
+    stage 3 "合并 $EXPERT_V30_ID + $ROLLOUT_DS_ID -> $MERGED_ID"
     [[ -e "$MERGED_DIR" ]] && { echo "错误: 合并输出已存在 $MERGED_DIR" >&2; exit 1; }
     # 顺序必须是 [专家, rollout]:阶段 4 依赖"前 N 集是专家"的布局
     "$SIM_PYTHON" -m lerobot.scripts.lerobot_edit_dataset \
@@ -139,7 +147,7 @@ if [[ "$START_STAGE" -le 3 ]]; then
         --repo_id "$MERGED_ID" \
         --push_to_hub false \
         --operation.type merge \
-        --operation.repo_ids "['$EXPERT_V30_ID', '$ROLLOUT_ID']"
+        --operation.repo_ids "['$EXPERT_V30_ID', '$ROLLOUT_DS_ID']"
 fi
 
 # ---------------- 阶段 4: 打 episode_success 标签 ----------------
@@ -156,7 +164,7 @@ if [[ "$START_STAGE" -le 4 ]]; then
     fi
     "$SIM_PYTHON" "$REPO_ROOT/scripts/label_rollout_dataset.py" \
         --dataset "$MERGED_DIR" \
-        --sidecar "$ROLLOUT_DIR/episode_success.json" \
+        --sidecar "$ROLLOUT_DS_DIR/episode_success.json" \
         --prefix-success "$EXPERT_EPISODES" \
         ${PREFIX_SIDECAR_ARGS[@]+"${PREFIX_SIDECAR_ARGS[@]}"}
 fi

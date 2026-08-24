@@ -166,6 +166,25 @@ def configure_rollout_saving(config, gym_config):
     return resolved
 
 
+def get_recorder_dataset_dir(env):
+    """Actual dataset directory created by the LeRobot recorder.
+
+    The recorder nests an auto-named ``<robot>_<scene>_<task>_NNN`` directory
+    under the configured save_path, so the sidecar must be written there, not
+    at the save_path root.
+    """
+    dataset_manager = getattr(getattr(env, "unwrapped", env), "dataset_manager", None)
+    if dataset_manager is None:
+        return None
+    for mode_cfgs in getattr(dataset_manager, "_mode_functor_cfgs", {}).values():
+        for functor_cfg in mode_cfgs:
+            functor = getattr(functor_cfg, "func", None)
+            full_path = getattr(functor, "dataset_full_path", None)
+            if full_path:
+                return Path(full_path)
+    return None
+
+
 def get_saved_episode_count(env):
     """Best-effort count of episodes the LeRobot recorder has written."""
     dataset_manager = getattr(getattr(env, "unwrapped", env), "dataset_manager", None)
@@ -181,7 +200,7 @@ def get_saved_episode_count(env):
     return max(episode_counts) if episode_counts else None
 
 
-def write_rollout_success_sidecar(rollout_dir, config, episode_records, saved_count):
+def write_rollout_success_sidecar(dataset_dir, config, episode_records, saved_count):
     """Persist per-episode success labels next to the rollout dataset.
 
     The sidecar is consumed by scripts/label_rollout_dataset.py, which writes
@@ -199,8 +218,8 @@ def write_rollout_success_sidecar(rollout_dir, config, episode_records, saved_co
         "saved_episode_count": saved_count,
         "episodes": episode_records,
     }
-    rollout_dir.mkdir(parents=True, exist_ok=True)
-    sidecar_path = rollout_dir / "episode_success.json"
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    sidecar_path = dataset_dir / "episode_success.json"
     with open(sidecar_path, "w") as f:
         json.dump(sidecar, f, indent=2)
 
@@ -725,8 +744,11 @@ def main():
                 env.reset(options={"save_data": loop_completed})
             except Exception as flush_err:  # noqa: BLE001
                 print(f"Warning: rollout flush reset failed: {flush_err}")
+            # 记录器会在 save_path 下再建 <robot>_<scene>_<task>_NNN 子目录,
+            # 边车必须写进真正的数据集目录。
+            dataset_dir = get_recorder_dataset_dir(env) or rollout_dir
             write_rollout_success_sidecar(
-                rollout_dir, config, episode_records, get_saved_episode_count(env)
+                dataset_dir, config, episode_records, get_saved_episode_count(env)
             )
         env.close()
 
