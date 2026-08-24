@@ -11,20 +11,57 @@
 
 # 目录
 
-- [仓库说明](#仓库说明)
+- [项目简介](#项目简介)
+- [代码结构](#代码结构)
 - [环境安装(uv 管理,按需安装)](#环境安装uv-管理按需安装)
-- [数据集](#数据集)
+- [任务与配置](#任务与配置)
+- [数据:下载、采集与校验](#数据下载采集与校验)
 - [训练](#训练)
 - [评估](#评估)
 - [支持的策略一览](#支持的策略一览)
-- [已发布 Checkpoint 结果](#已发布-checkpoint-结果)
+- [评估结果](#评估结果)
+- [更多文档](#更多文档)
 
-# 仓库说明
+# 项目简介
 
-本仓库基于 [EmbodiChain](https://dexforce.github.io/EmbodiChain/) 构建 RoboSynChallenge
-双臂操作挑战赛的仿真环境,包含 10 个任务(click_bell、water_pouring、item_assembly 等)
-的数据采集、策略训练与统一评估,并集成了 8 个策略的完整训练/部署链路:
-**ACT、Diffusion Policy、pi0、pi0.5、DM0.5、G0.5、Motus、XR-1**。
+RoboSynChallenge 是基于 [EmbodiChain](https://dexforce.github.io/EmbodiChain/) 构建的
+双臂机器人(CobotMagic,14-DoF)操作挑战赛,核心问题是:**在仿真中合成的操作技能,
+能否泛化到域随机化乃至真实世界**。
+
+本仓库提供完整的闭环工具链:
+
+- **10 个双臂操作任务**的仿真环境与专家轨迹生成器(按低/中/高三档难度分级);
+- **数据采集流水线**:专家演示 → LeRobot 数据集(v3.0/v2.1)→ 多重校验门 → 训练就绪;
+- **8 个策略的训练/部署集成**:ACT、Diffusion Policy、pi0、pi0.5、DM0.5、G0.5、Motus、XR-1,
+  统一评估接口,任何策略实现 `deploy_policy.py` 即可接入;
+- **标准化评估协议**:clear / random / random_3p 三种设置,固定判据与随机种子,结果可复现。
+
+# 代码结构
+
+```text
+RoboSynChallenge/
+├── robosynchallenge/     # 核心 Python 包:任务定义、管理器、域随机化、轨迹回放
+│   ├── tasks/            #   10 个任务的环境与专家策略
+│   ├── managers/         #   episode 管理、数据落盘
+│   ├── Distractor/       #   干扰物资产与随机摆放
+│   └── replay.py         #   轨迹回放
+├── configs/              # 每任务一个目录:gym_config(场景/相机/随机化)+ action_config(专家动作)
+│   └── <task>/{clear,random,random_3p,aug_*}/
+├── launch/               # 数据采集/环境检查/可视化脚本(详见 launch/README.md)
+├── scripts/              # 采集入口、评估入口、数据集工具(详见 scripts/README.md)
+├── policy/               # 8 个策略的独立训练/部署环境(互不污染)
+│   ├── act/  dp/         #   LeRobot 栈(uv 项目)
+│   ├── pi0/  pi05/       #   openpi JAX 栈(uv 项目)
+│   ├── dm05/ g05/ motus/ xr1/   # 各自的环境搭建脚本
+│   └── Your_Policy/      #   接入自定义策略的模板
+├── lerobot_dataset/      # 本地采集的数据默认落在这里
+├── evaluation_results/   # 已发布 ACT/DP checkpoint 的百集评估结果(机器可读)
+├── report/               # pi0.5 官方协议评估报告(random×100)
+├── docs/                 # 完整教程(安装/采集/随机化/各策略训练)
+├── SETUP.md              # 环境搭建速查(本页的展开版)
+├── requirements.txt      # 仿真环境精确锁定依赖
+└── pyproject.toml        # 根包定义 + 环境分层说明
+```
 
 # 环境安装(uv 管理,按需安装)
 
@@ -45,7 +82,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 | 只训练策略 | 无。clone 本仓库即可,依赖全部来自公开源 |
 | 仿真采集/评估 | ① [EmbodiChain](https://github.com/DexForce/EmbodiChain) clone 到**本仓库同级目录**;② `dexsim-engine` 闭源仿真引擎的私有 pip 源访问权限 |
 
-目录布局约定(评估用户):
+目录布局约定(采集/评估用户):
 
 ```text
 workspace/
@@ -63,6 +100,8 @@ uv pip install -r requirements.txt            # 精确锁定的仿真依赖(含�
 uv pip install -e . --no-deps                 # 本仓库根包
 uv pip install -e ../EmbodiChain --no-deps    # 仿真框架
 ```
+
+装好后可用 `bash launch/check_all_envs.sh` 依次拉起全部任务环境做冒烟检查。
 
 ## 2. 策略训练环境(按需,进哪个装哪个)
 
@@ -86,28 +125,87 @@ uv sync --extra sim    # 追加仿真评估依赖(需要 EmbodiChain 同级 clon
 其余策略(dm05 / g05 / motus / xr1)依赖树庞大且含自编译组件(flash-attn、
 DeepSpeed 等),各自目录下的 `setup_env.sh` 或 README 说明了环境搭建方式。
 
-# 数据集
+# 任务与配置
 
-每个任务提供 1000 条预采集轨迹,托管在 HuggingFace:[数据集入口](https://edem-ai.github.io/robosynchallenge.github.io/#/data)。
+## 任务列表(按难度分级)
 
-也强烈建议自行采集(可控制随机化设置):
+| 难度 | 任务 | 说明 |
+|---|---|---|
+| Low | `click_bell` | 按响桌铃 |
+| Low | `handle_basket` | 双臂搬运提篮 |
+| Low | `water_pouring` | 倒水 |
+| Low | `table_rearrangement` | 桌面整理 |
+| Mid | `items_handover` | 双臂物品交接 |
+| Mid | `drawer_open_place` | 开抽屉并放入物品 |
+| Mid | `mixer_operating` | 操作搅拌机 |
+| High | `item_assembly` | 物品装配 |
+| High | `manipulate_pipette` | 移液枪操作 |
+| High | `sample_loading` | 样品装载 |
+
+运行 `bash launch/_print_available_tasks.sh` 可随时查看任务清单。
+
+## 配置目录
+
+每个任务在 `configs/<task>/` 下有若干套配置,每套包含
+`gym_config.json`(场景、相机内外参、光照/材质/物体位姿随机化)和
+`action_config.json`(专家轨迹参数):
+
+| 设置 | 含义 |
+|---|---|
+| `clear` | 无域随机化,固定场景 |
+| `random` | 官方域随机化协议(评测口径) |
+| `random_3p` | `random` + 仅录像用的第三视角相机(**不进入模型观测**,用于评估录像) |
+| `aug_base` / `aug_near` / `aug_farright` | 相机视角增广采集配置 |
+
+域随机化效果可用 `bash launch/run_visualize.sh <task>`(单任务)或
+`bash launch/batch_run_visualize.sh`(全任务)可视化。详见
+[docs/tutorials/domain_randomization.md](docs/tutorials/domain_randomization.md) 与
+[docs/tutorials/configuration.md](docs/tutorials/configuration.md)。
+
+# 数据:下载、采集与校验
+
+## 直接下载
+
+每任务 1000 条预采集轨迹托管在 HuggingFace:[数据集入口](https://edem-ai.github.io/robosynchallenge.github.io/#/data),
+下载方法见 [docs/tutorials/download_data.md](docs/tutorials/download_data.md)。
+
+## 自行采集
 
 ```bash
-# 单任务采集(仿真环境中)
-bash launch/run_task.sh <task_name> <setting>
-# 带验证的批量采集
-bash launch/collect_validated_batch.sh <task_name> <setting> <episodes>
+# 基础采集:<task> <setting> <format>,format 为 3_0 或 2_1(自动转换)
+bash launch/run_task.sh click_bell clear 2_1 --max_episodes 100 --headless
+
+# clear + random 混合采集并自动合并
+bash launch/collect_combined_dataset.sh <task> ...
+
+# 带校验门的采集(推荐,产出即训练就绪):
+bash launch/collect_validated_batch.sh ...      # 单批采集,全部校验门通过才晋级
+bash launch/collect_until_valid.sh ...          # 反复产出候选批直到整批通过校验
+bash launch/collect_parallel_validated.sh ...   # 多分片并行采集→逐片校验→合并→再校验
 ```
 
-训练用的 LeRobot 数据集放到对应 policy 的 `training_data/` 下,例如:
+数据默认写入 `lerobot_dataset/<task>/`。常用选项:`--max_episodes N`、`--headless`、
+`--filter_visual_rand`(关视觉随机化)、`--filter_dataset_saving`(只跑不存盘)。
+完整说明见 [launch/README.md](launch/README.md)。
 
-```text
-policy/pi05/training_data/RoboSynChallenge/cobotmagic_Sim_click_bell/
-```
+## 数据集工具(scripts/)
+
+| 脚本 | 用途 |
+|---|---|
+| `validate_lerobot_dataset.py` | 训练视角的严格校验(v2.1/v3.0),首个失败门即非零退出,可作采集流水线的硬门禁 |
+| `convert_lerobot3.0_to_2.1.py` | LeRobot v3.0 → v2.1 格式转换 |
+| `prepare_sim_real_cotrain.py` | 把 Real 数据对齐到 Sim 的 schema(fps/维度/键名)并合并,用于 sim-real 共训 |
+| `add_lerobot_eef_pose.py` | 为数据集追加末端执行器位姿特征 |
+| `camera_extrinsics_to_lootat.py` | 相机标定外参 → EmbodiChain eye/target/up 配置片段 |
+| `visualize_distribution.py` | 数据分布可视化 |
+
+轨迹回放:`bash launch/replay_task.sh`(支持 kinematic / dynamic / control 三种模式)。
+各脚本详细用法见 [scripts/README.md](scripts/README.md)。
 
 # 训练
 
-每个策略目录下都有一个注释详细的 `finetune.sh`,用法开箱即用:
+每个策略目录下都有一个注释详细的 `finetune.sh`(用法、超参、数据格式、断点续训
+都写在头部注释里),开箱即用:
 
 ```bash
 # ACT / Diffusion Policy(从零训练,单张消费级显卡即可)
@@ -117,7 +215,7 @@ cd policy/dp  && bash finetune.sh <dataset_root> outputs/train/dp_click_bell 0
 # pi0 / pi0.5(官方基座全量微调,JAX 栈)
 cd policy/pi0  && bash finetune.sh pi0_base_robosynchallenge_full my_exp 0
 cd policy/pi05 && bash finetune.sh pi05_click_bell my_exp 0
-# pi0.5 也提供 10 个任务的一键脚本:
+# pi0.5 另有 10 个任务的一键脚本(内置配置名与数据检查):
 cd policy/pi05/train_scripts && ./train_click_bell.sh 0
 
 # DM0.5(OpenDM SFT,独立环境,见 policy/dm05/README.md)
@@ -129,40 +227,88 @@ bash policy/motus/finetune.sh 8
 bash policy/xr1/finetune.sh <training_data_dir> <exp_name> 0
 ```
 
-超参、数据格式、输出目录、断点续训方式都写在各 `finetune.sh` 的头部注释里。
-接入自己的策略请参考 `policy/Your_Policy/` 模板与[官方文档](https://edem-ai.github.io/RoboSynChallenge/html/tutorials/policy/your_own_policy.html)。
+训练数据放到对应 policy 的 `training_data/` 下,例如
+`policy/pi05/training_data/RoboSynChallenge/cobotmagic_Sim_click_bell/`。
+
+各策略的图文教程:[docs/tutorials/policy/](docs/tutorials/policy/)
+(act / dp / pi0 / pi05 / motus 各一篇)。
 
 # 评估
 
-评估在仿真环境里运行(需要 `--extra sim` 或根环境),每个策略目录下有 `eval.sh`:
+评估在仿真环境里运行(需要 `--extra sim` 或根环境)。统一入口是
+`scripts/eval_policy.py --config policy/<name>/deploy_policy.yml`,
+每个策略目录下的 `eval.sh` 已做好包装:
 
 ```bash
 # 示例:pi0.5
 cd policy/pi05
 uv sync --extra sim
 bash eval.sh <task_name> <setting> <train_config> <model_name> <gpu_id>
+# 例:bash eval.sh click_bell random pi05_click_bell my_exp 0 --max_episodes 100
+
+# DM0.5 是服务式推理:先起模型服务,再在仿真环境跑评估
+bash launch/run_dm05_server.sh <checkpoint_dir>
+cd policy/dm05 && bash eval.sh <task_name> <setting> ...
 ```
 
-`<setting>` 支持 `clear` / `random` / `random_3p`(第三方随机化协议)等,
-对应 `configs/<task>/<setting>/gym_config.json`。
+`<setting>` 对应 `configs/<task>/<setting>/`:日常验证用 `clear`,
+正式评测用 `random`(官方口径,每 10 步重随机化),
+需要评估录像时用 `random_3p`。
+
+## 接入自己的策略
+
+复制 `policy/Your_Policy/` 模板,实现 `deploy_policy.py` 中的
+`get_model / encode_obs / eval` 接口并填写 `deploy_policy.yml`,即可复用统一评估
+流程。详见 [docs/tutorials/policy/your_own_policy.md](docs/tutorials/policy/your_own_policy.md)。
 
 # 支持的策略一览
 
 | 策略 | 类型 | 训练栈 | 训练显存需求 | 环境 |
 |---|---|---|---|---|
-| ACT | 轻量模仿学习 | LeRobot / torch | ~8 GB | uv(policy/act) |
+| ACT | 轻量模仿学习(CVAE+Transformer) | LeRobot / torch | ~8 GB | uv(policy/act) |
 | Diffusion Policy | 扩散策略 | LeRobot / torch | ~10 GB | uv(policy/dp) |
-| pi0 | VLA(3B) | openpi / JAX | 全量 ~80 GB,可调小 batch | uv(policy/pi0) |
-| pi0.5 | VLA(3B) | openpi / JAX | 全量 ~80 GB,可调小 batch | uv(policy/pi05) |
-| DM0.5 | VLA | OpenDM / torch | 多卡 SFT | conda(见 policy/dm05) |
-| G0.5 | VLA(2B) | GalaxeaVLA / torch | >70 GB/卡,官方 8 卡 | venv(见 policy/g05) |
-| Motus | VLA | Motus / DeepSpeed | >80 GB/卡 | venv(见 policy/motus) |
+| pi0 | VLA(PaliGemma 3B + action expert) | openpi / JAX | 全量 ~80 GB,可调小 batch | uv(policy/pi0) |
+| pi0.5 | VLA(pi0 升级版,开放世界泛化) | openpi / JAX | 全量 ~80 GB,可调小 batch | uv(policy/pi05) |
+| DM0.5 | VLA(服务式推理) | OpenDM / torch | 多卡 SFT | conda(见 policy/dm05) |
+| G0.5 | VLA(2B VLM + action expert) | GalaxeaVLA / torch | >70 GB/卡,官方 8 卡 | venv(见 policy/g05) |
+| Motus | VLA(视频生成先验) | Motus / DeepSpeed | >80 GB/卡 | venv(见 policy/motus) |
 | XR-1 | VLA(5.5B) | Xiaomi-Robotics / torch | 冻结 VLM 可单卡 48 GB | venv(见 policy/xr1) |
 
-# 已发布 Checkpoint 结果
+# 评估结果
 
-已发布 ACT 与 Diffusion Policy checkpoint 的 100-episode 仿真评估结果见
-[`evaluation_results`](evaluation_results/README.md),结果文件固定了成功率、
-动作步数、推理耗时、HuggingFace checkpoint 版本与 `random` 协议配置。
+## pi0.5(官方初赛协议,random × 100 集/任务)
+
+完整报告与逐任务分析见 [report/README.md](report/README.md),原始数据在 `report/results.csv`:
+
+| 任务 | 成功率 | ACT 基线 | DP 基线 |
+|---|---|---|---|
+| mixer_operating | **85%** | 77% | 69% |
+| water_pouring | **80%** | 72% | 33% |
+| items_handover | **79%** | - | - |
+| table_rearrangement | **77%** | 63% | 16% |
+| click_bell | **73%** | 37% | 44% |
+| manipulate_pipette | **71%** | - | - |
+| item_assembly | 16% | - | - |
+| sample_loading | 3% | - | - |
+
+## 已发布 ACT / DP checkpoint
+
+100 集仿真评估结果见 [evaluation_results/README.md](evaluation_results/README.md),
+机器可读文件固定了成功率、动作步数、推理耗时、HuggingFace checkpoint 版本与
+`random` 协议配置。
 
 完整榜单与评测设置:https://edem-ai.github.io/robosynchallenge.github.io/#/leaderboard
+
+# 更多文档
+
+| 文档 | 内容 |
+|---|---|
+| [SETUP.md](SETUP.md) | 环境搭建速查(仿真环境 + 训练环境的展开说明) |
+| [docs/getting_started/](docs/getting_started/) | 安装、总览、代码结构 |
+| [docs/tutorials/collect_data.md](docs/tutorials/collect_data.md) | 数据采集完整教程 |
+| [docs/tutorials/task_trajectory.md](docs/tutorials/task_trajectory.md) | 任务轨迹生成原理 |
+| [docs/tutorials/domain_randomization.md](docs/tutorials/domain_randomization.md) | 域随机化机制 |
+| [docs/tutorials/configuration.md](docs/tutorials/configuration.md) | 配置文件字段说明 |
+| [docs/tutorials/policy/](docs/tutorials/policy/) | 各策略训练/评估教程 |
+| [launch/README.md](launch/README.md) | 采集/回放/可视化脚本手册 |
+| [scripts/README.md](scripts/README.md) | 数据集工具手册 |
