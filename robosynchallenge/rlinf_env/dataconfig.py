@@ -26,10 +26,61 @@ from openpi.policies import libero_policy
 from openpi.training.config import DataConfig, DataConfigFactory, ModelTransformFactory
 from typing_extensions import override
 
-__all__ = ["LeRobotRoboSynChallengeDataConfig", "register", "CONFIG_NAME"]
+__all__ = [
+    "LeRobotRoboSynChallengeDataConfig",
+    "UnstackWristImages",
+    "register",
+    "CONFIG_NAME",
+]
 
 # yaml 里 actor.model.openpi.config_name 要写的名字
 CONFIG_NAME = "pi05_robosynchallenge"
+
+
+@dataclasses.dataclass(frozen=True)
+class UnstackWristImages(_transforms.DataTransformFn):
+    """把 RLinf 堆叠的腕部图拆成 EmbodiChainInputs 要的两个独立键。
+
+    这是 RL 推理路径和 SFT 数据路径之间唯一的形状差异,不处理会在第一次推理就 KeyError。
+
+    RLinf 的 actor(``rlinf/models/embodiment/openpi/openpi_action_model.py``
+    的 ``obs_processor``)把环境观测拼成::
+
+        observation/image        主视角
+        observation/wrist_image  **单数**,所有腕部相机 stack 成 [N_IMG, H, W, C]
+        observation/state
+        prompt
+
+    而 SFT 用的 ``openpi.policies.libero_policy.EmbodiChainInputs`` 读的是
+    ``observation/left_wrist_image`` 和 ``observation/right_wrist_image`` 两个独立键。
+    openpi 的 repack_transforms 只作用于数据集,不参与推理,补不上这个差。
+
+    索引顺序是有语义的:``[0]`` 是左腕、``[1]`` 是右腕,与环境侧
+    ``wrist_cameras: [cam_left_wrist, cam_right_wrist]`` 的顺序对应(见
+    ``robosynchallenge/rlinf_env/vla_env.py``)。搞反了不会报错,只会让左右腕视角互换。
+    RLinf 自带的 ``aloha_policy._decode_aloha`` 用的是同一套约定。
+
+    数据集路径下本来就是三键形式,这里直接放行。
+    """
+
+    def __call__(self, data: dict) -> dict:
+        if "observation/wrist_image" not in data:
+            return data  # 数据集路径:repack 已经产出三键形式
+
+        data = dict(data)
+        wrist = data.pop("observation/wrist_image")
+
+        # 走到这里时 batch 维已经被 RLinf 的 input_transform 按样本拆掉,
+        # 所以是 [N_IMG, H, W, C];只挂了一路腕部相机时退化成 [H, W, C]。
+        if getattr(wrist, "ndim", 0) == 4:
+            data["observation/left_wrist_image"] = wrist[0]
+            data["observation/right_wrist_image"] = wrist[1]
+        else:
+            # 单腕:右腕用左腕填充。EmbodiChainInputs 对三路图都置了 image_mask=True,
+            # 给零图会让模型看到一路全黑输入,复制反而更接近训练分布。
+            data["observation/left_wrist_image"] = wrist
+            data["observation/right_wrist_image"] = wrist
+        return data
 
 
 @dataclasses.dataclass(frozen=True)
@@ -66,8 +117,14 @@ class LeRobotRoboSynChallengeDataConfig(DataConfigFactory):
             ]
         )
 
+        # UnstackWristImages 必须排在 EmbodiChainInputs 之前:后者读的是拆开后的
+        # 两个腕部键。EmbodiChainInputs / EmbodiChainOutputs 直接用 openpi 原版,
+        # 不做任何修改——SFT 用的就是它们,语义必须逐字一致。
         data_transforms = _transforms.Group(
-            inputs=[libero_policy.EmbodiChainInputs(model_type=model_config.model_type)],
+            inputs=[
+                UnstackWristImages(),
+                libero_policy.EmbodiChainInputs(model_type=model_config.model_type),
+            ],
             outputs=[libero_policy.EmbodiChainOutputs()],
         )
 
