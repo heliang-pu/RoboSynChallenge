@@ -1,0 +1,3 @@
+# DexForce 私有源独有的包(http://pyp.open3dv.site:2345/simple/),与 requirements.lock.txt 分开装:
+# 主 lock 只走 PyPI,免得 uv 对每个包都去敲那个时常超时的私有源。依赖已全在主 lock 里,装时 --no-deps。
+dexsim-engine==0.4.3

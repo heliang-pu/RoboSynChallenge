@@ -26,10 +26,13 @@ PyTorch，用自己的重实现训练"，没有 JAX 训练路径可用。
 | EmbodiChain | `~/workspace/EmbodiChain` | `EMBODICHAIN_ROOT` 可覆盖；worktree 下同级目录假设不成立，脚本会自动回退查找 |
 | pi0.5 SFT checkpoint | `policy/pi05/checkpoints/...` | openpi 的 orbax 格式 |
 
-RLinf 环境安装见其官方文档（`bash requirements/install.sh embodied --model openpi --env embodichain`）。
-**注意**：它默认从 DexForce 私有源装 `embodichain>=0.2.4` 的 wheel。本仓库的任务是针对
-`~/workspace/EmbodiChain` 这个工作副本写的，建议在 RLinf 的 venv 里改成 editable 安装本地版本，
-否则任务代码和引擎版本可能对不上。
+RLinf 环境**优先用锁定版本复现**：`bash envs/rlinf/install_from_lock.sh`（见 `envs/rlinf/README.md`）。
+它按本机跑通冒烟 PPO 时的 `uv pip freeze` 一步装好，并自动完成 EmbodiChain editable、并行补丁、
+RLinf 挂钩和校验。
+
+不推荐走 RLinf 官方 `install.sh`：`--model openpi --env embodichain` 这个组合它不支持，
+而且 env 侧按 torch 2.11 解析后又被 `rlinf-openpi` 降到 2.7.1，连带换掉 12 个包；本机就是
+这么踩过来的，`launch/rlinf_setup_env.sh` 是那条路的善后脚本，留着备查。
 
 ## 第一步：转换 checkpoint
 
