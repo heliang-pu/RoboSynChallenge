@@ -22,7 +22,7 @@ import pathlib
 
 import openpi.models.model as _model
 import openpi.transforms as _transforms
-from openpi.policies import libero_policy
+from robosynchallenge.rlinf_env import transforms as _rsc_transforms
 from openpi.training.config import DataConfig, DataConfigFactory, ModelTransformFactory
 from typing_extensions import override
 
@@ -118,14 +118,15 @@ class LeRobotRoboSynChallengeDataConfig(DataConfigFactory):
         )
 
         # UnstackWristImages 必须排在 EmbodiChainInputs 之前:后者读的是拆开后的
-        # 两个腕部键。EmbodiChainInputs / EmbodiChainOutputs 直接用 openpi 原版,
-        # 不做任何修改——SFT 用的就是它们,语义必须逐字一致。
+        # 两个腕部键。EmbodiChainInputs / EmbodiChainOutputs 是从 SFT 用的 openpi fork
+        # 逐字 vendor 到 robosynchallenge/rlinf_env/transforms.py 的(rlinf-openpi 里没有
+        # 它们),语义必须与 policy/pi05 那份保持逐字一致。
         data_transforms = _transforms.Group(
             inputs=[
                 UnstackWristImages(),
-                libero_policy.EmbodiChainInputs(model_type=model_config.model_type),
+                _rsc_transforms.EmbodiChainInputs(model_type=model_config.model_type),
             ],
-            outputs=[libero_policy.EmbodiChainOutputs()],
+            outputs=[_rsc_transforms.EmbodiChainOutputs()],
         )
 
         if self.extra_delta_transform:
