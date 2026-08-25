@@ -323,6 +323,14 @@ Ray 编排 → env worker 在 CUDA 建环境 → rollout → advantage → actor
 跑到这一步共修了三处接口问题：vendor `EmbodiChainInputs`、`openpi_data.norm_stats_path`、
 启动器激活 venv —— 都已在上文各节说明。
 
+**产物在哪**：RLinf 每次启动建一个 `~/workspace/RLinf/logs/<时间戳>-<配置名>/` 目录，
+checkpoint 在其下 `<experiment_name>/checkpoints/global_step_<N>/actor/model_state_dict/full_weights.pt`
+（整模型含 value head，单个就是好几 GB，注意磁盘）。RLinf 的 `get_model` 认这个布局 ——
+把 `actor.model.model_path` 指到 `global_step_<N>` 目录即可续训或评测，不用再转格式。
+要回到 `policy/pi05` 的评测栈，需要另写一步把 `full_weights.pt` 导出成
+`model.safetensors` + `assets/`（RLinf 的 `rlinf/utils/ckpt_convertor/openpi/sft2deploy.py`
+是现成起点），这一步还没做。
+
 ## 还没做完的
 - **其余 9 个任务未做向量化修复**。审计结论（一次 10 agent 并行审计）：全部任务都有
   num_envs>1 问题，PPO 路径上共约 35 处需修；mixer_operating 已修并实测。修法参照
