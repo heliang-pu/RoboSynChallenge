@@ -40,8 +40,9 @@ export PYTHONUNBUFFERED=1
 export MUJOCO_GL="${MUJOCO_GL:-egl}"
 export PYOPENGL_PLATFORM="${PYOPENGL_PLATFORM:-egl}"
 
-TMP_LOG="$(mktemp -t rsc_bench_XXXXXX.log)"
-trap 'rm -f "$TMP_LOG"' EXIT
+# 失败日志必须保留:引擎崩溃不产生 Python traceback,现场一丢就只能靠猜。
+FAIL_DIR="${RSC_BENCH_FAIL_DIR:-/tmp/rsc_bench_failures}"
+mkdir -p "$FAIL_DIR"
 
 echo "task=$TASK  档位=$ENVS  (每档一个独立进程)"
 echo
@@ -54,6 +55,7 @@ for n in "${LEVELS[@]}"; do
     n="$(echo "$n" | tr -d '[:space:]')"
     [[ -z "$n" ]] && continue
 
+    TMP_LOG="$(mktemp -t rsc_bench_XXXXXX.log)"
     "$RLINF_VENV_PYTHON" "$ROBOSYN_PATH/scripts/bench_env_throughput.py" \
         --task "$TASK" --num-envs "$n" "${@:3}" > "$TMP_LOG" 2>&1
 
@@ -61,13 +63,16 @@ for n in "${LEVELS[@]}"; do
     if [[ -z "$line" ]]; then
         # 没拿到结果:要么 OOM,要么引擎在建环境阶段就退了。把最后一条像样的错误摘出来。
         reason="$(grep -a -oiE '(CUDA out of memory|RuntimeError:.*|AttributeError:.*|ValueError:.*|KeyError:.*)' "$TMP_LOG" | tail -1)"
-        printf "%9s  失败: %s\n" "$n" "${reason:-无结果(可能显存不足或引擎提前退出);完整日志见 $TMP_LOG}"
+        kept="$FAIL_DIR/${TASK}_n${n}_$(date +%H%M%S).log"
+        mv "$TMP_LOG" "$kept"
+        printf "%9s  失败: %s\n" "$n" "${reason:-无结果;完整日志已保留: $kept}"
         continue
     fi
 
     fps="$(sed -E 's/.*fps=([0-9.]+).*/\1/' <<< "$line")"
     ms="$(sed -E 's/.*ms_per_step=([0-9.]+).*/\1/' <<< "$line")"
     gb="$(sed -E 's/.*peak_gb=([0-9.]+).*/\1/' <<< "$line")"
+    rm -f "$TMP_LOG"
     [[ -z "$BASELINE" ]] && BASELINE="$fps"
     speedup="$(awk -v a="$fps" -v b="$BASELINE" 'BEGIN{printf "%.1f", (b>0? a/b : 0)}')"
     printf "%9s %14s %10s %10s %11sx\n" "$n" "$fps" "$ms" "$gb" "$speedup"
