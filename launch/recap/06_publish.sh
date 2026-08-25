@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # 发布一轮:no_reward(未过价值模型)与 reward(指定 checkpoint 打标)两版 v2.1 → NAS + 本地。
 # 阶段 6b-7:全量推理写回三列 → no_reward/reward 两版 v2.1 → NAS + 本地(建议 detach 运行,约 1.5h)
-# 用法: 06_publish.sh <task> <tag> <checkpoint_step>      例: publish_round.sh sample_loading round1 003000
+# 用法: 06_publish.sh <task> <tag> <checkpoint_step> [gpu=0]   例: 06_publish.sh sample_loading round1 003000
 # 需要: .simrecap_work/<task>_<tag>/merged_v30 已打好 episode_success;outputs/value_train/value_<task>_<tag>/checkpoints/<step>
 set -uo pipefail; source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
-TASK=${1:?task}; TAG=${2:?tag}; STEP=${3:?checkpoint step, e.g. 003000}
+TASK=${1:?task}; TAG=${2:?tag}; STEP=${3:?checkpoint step, e.g. 003000}; GPU=${4:-0}
 
 WORK=$WORK_ROOT/${TASK}_${TAG}
 
@@ -73,7 +73,7 @@ PYEOF
 log "1) no_reward"; rm -rf "$WORK/no_reward_v30"; cp -r "$WORK/merged_v30" "$WORK/no_reward_v30"
 publish no_reward_v30 "$NAS/recap_no_reward_dataset" 0 || exit 1
 log "2) 阶段 6: checkpoint $STEP 推理写回 merged_v30(列后缀 _$TAG)"
-bash "$REPO/launch/run_value_infer.sh" "$WORK/merged_v30" "$CK" "$TAG" 0 --runtime.batch_size 32 > "$LOGDIR/value_infer_${TAG}.log" 2>&1 \
+bash "$REPO/launch/run_value_infer.sh" "$WORK/merged_v30" "$CK" "$TAG" "$GPU" --runtime.batch_size 96 > "$LOGDIR/value_infer_${TAG}.log" 2>&1 \
     || { log "错误: 阶段 6 失败,见 $LOGDIR/value_infer_${TAG}.log"; exit 1; }
 grep -a "ACP stats" "$LOGDIR/value_infer_${TAG}.log" | tail -1
 log "3) reward"; rm -rf "$WORK/reward_v30"; cp -r "$WORK/merged_v30" "$WORK/reward_v30"

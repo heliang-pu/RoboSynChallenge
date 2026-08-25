@@ -38,7 +38,7 @@ bash launch/recap/03_build_pool.sh sample_loading round1 \
 bash launch/recap/04_value_train.sh sample_loading round1
 
 # 6a 质检选档(60 集子集,每档 ~10 分钟)→ 选 advantage 信号最强且分离度 ≥0.3 的档
-bash launch/recap/05_value_qc.sh sample_loading round1 002000 003000 004000
+bash launch/recap/05_value_qc.sh sample_loading round1 001500 002000 003000   # 只列已存在的档
 bash launch/recap/stop.sh lerobot_value_train                     # 发布前必须停训
 
 # 6b-7 全量推理写回 + 发布 no_reward / reward 两版 v2.1 到 NAS 与本地(~1.5h)
@@ -50,10 +50,13 @@ bash launch/recap/07_acp_finetune.sh sample_loading round1 sample_loading_round1
 
 # 9 官方 random 协议评估(自动取最新 checkpoint,自动挂 Advantage: positive)
 bash launch/recap/08_eval.sh sample_loading round1 sample_loading_round1 100
+# 对照组评估必须同样设 none,否则 prompt 会被追加标签:
+SIMRECAP_INDICATOR_KEY=none bash launch/recap/08_eval.sh sample_loading round1 sample_loading_round1_sft 100
 ```
 
-下一轮:`01_rollout.sh sample_loading round2 pi05_sim_recap sample_loading_round1 19999 150`,
-`03_build_pool.sh sample_loading round2 lerobot_dataset/simrecap_sample_loading_round1`(自带边车,失败集标签会被正确恢复),
+下一轮:`01_rollout.sh sample_loading round2 pi05_sim_recap sample_loading_round1 19999 150`(脚本会从 checkpoint 的
+assets 推出 `SIMRECAP_REPO_ID`),`03_build_pool.sh sample_loading round2 lerobot_dataset/simrecap_sample_loading_round1`
+(上轮 reward 池:自带边车,失败集标签会被正确恢复;脚本会先去掉它的 `complementary_info.*` 三列再与新 rollout 合并),
 `07` 的权重指向 `checkpoints/pi05_sim_recap/sample_loading_round1/19999/params`。
 
 ## 每步的判定规则
@@ -63,7 +66,7 @@ bash launch/recap/08_eval.sh sample_loading round1 sample_loading_round1 100
 | 01 rollout | 成功率、`validate_lerobot_dataset` 四门 | `random_rollout` 下 sample_loading ≈7%;全败也可继续(负样本) |
 | 02 复核 | 三视角终态:管子是否留在架孔内直立 | 评估器在稳定计数触发后就结束,可能漏掉后来掉出 |
 | 03 数据池 | 专家:rollout 比例 | round1 用 200:150;专家用 NAS `Sim_clean_filtered`(756 集),不用本地 1000 集原始版 |
-| 04 训练 | wandb loss | 参考:5.3→2.0(500)→1.4(2000)→1.2(3000)→0.72(6000+ 平台) |
+| 04 训练 | wandb loss | 参考:5.3→2.1(500)→1.4(2000)→1.2(3000)→0.82(5000)→0.73(6000+ 平台) |
 | 05 质检 | 成功−失败首帧 value 差;advantage std;近零占比 | 差 ≥0.3 的档里取 std 最大者。round1:1500 步差 0.11(欠训);**3000 步差 0.43、std 0.030(选)**;6500 步差 0.69 但 std 0.005、96% 帧≈0(记忆化,弃) |
 | 06 发布 | 日志 `ACP stats`、"三列存活确认"、NAS 就绪行 | 专家帧 indicator≈10% 为正是 top-30% 混算的正常结果 |
 | 08 评估 | 同协议对比 ACP vs 纯 SFT(no_reward 或 `SIMRECAP_INDICATOR_KEY=none`) | 提升归因需要这组对照 |
@@ -79,7 +82,7 @@ bash launch/recap/08_eval.sh sample_loading round1 sample_loading_round1 100
 | NAS `recap_no_reward_dataset/simrecap_<task>_<tag>/` | 合并池,未过价值模型(纯 SFT 对照) |
 | NAS `recap_reward_dataset/simrecap_<task>_<tag>/` + 本地 `lerobot_dataset/simrecap_<task>_<tag>/` | 合并池 + `value/advantage/acp_indicator_<tag>` 三列(ACP 训练用,已链进 `policy/pi05/training_data/RoboSynChallenge/`) |
 
-标签载体:集级成败只认 **`episode_success.json` 边车**(v2.1 的 jsonl 虽带该字段但转换/打标脚本不读);
+标签载体:集级成败只认 **`episode_success.json` 边车**(打过标的合并池转成 v2.1 后 jsonl 里也会带该字段,但转换/打标脚本不读它;rollout 交付版只有边车);
 两个方向的格式转换器都会丢边车,脚本负责带回;上轮池当专家用而缺边车时 `03` 会拒绝。
 三列 advantage 标签是普通帧级数据列,v2.1 原样携带,训练时由 openpi 的 `ACPAdvantageTag` 现场拼成 prompt 文本。
 
@@ -99,7 +102,7 @@ bash launch/recap/08_eval.sh sample_loading round1 sample_loading_round1 100
 - **merge/convert 在 pandas 上崩**:parquet 带 HF 扩展 dtype;脚本会先剥元数据(`_common.sh strip_meta`)。
 - **训练被会话重启杀掉**:脚本用 `setsid nohup` 脱离;自己起长任务也要这样。
 - **wandb 404**:机器 `~/.netrc` 账号与浏览器账号不一致;`wandb login --relogin <key>` 后重启训练。当前登录 `puheliang`。
-- **价值训练目录已存在**:`FileExistsError`;删除或 `--resume=true --config_path=.../checkpoints/last/pretrained_model/value_train_config.json`。
+- **价值训练目录已存在**:`FileExistsError`(训练器要求 output_dir 不存在,启动脚本/日志放在旁边的 `.launch` 目录);删除或 `--resume=true --config_path=.../checkpoints/last/pretrained_model/value_train_config.json`。
 - **发布被拒绝**:价值训练还在跑(会读 merged_v30)/ 同 tag 重复发布(列已存在)/ merged_v30 没打标——按提示处理。
 - **评估找不到 checkpoint**:20k 步训练只存 `10000/19999`,`08_eval.sh` 自动选最新;手动跑 eval.sh 要加 `--checkpoint_id`。
 - **norm stats 跨轮不重算**:`finetune.sh` 只看配置名目录;`07_acp_finetune.sh` 按 repo_id 路径检查。

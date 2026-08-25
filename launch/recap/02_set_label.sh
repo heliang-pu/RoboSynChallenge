@@ -11,7 +11,7 @@ work, deliver, ep, label = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[
 targets = [f"{deliver}/episode_success.json", f"{work}/rollout_v30/rollout_merged/episode_success.json"]
 # 分片:按顺序累计集数定位
 off = 0
-for d in sorted(glob.glob(f"{work}/shards/s*/*/episode_success.json")):
+for d in sorted(glob.glob(f"{work}/shards/s*/*/episode_success.json"), key=lambda q: int(q.split("/shards/s")[1].split("/")[0])):
     n = len(json.load(open(d))["episodes"])
     if off <= ep < off + n: targets.append((d, ep - off)); break
     off += n

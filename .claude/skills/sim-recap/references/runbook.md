@@ -10,12 +10,12 @@
 | 1b 复核 | 三视角看 `rollouts/<task>_<tag>/videos/`;`bash launch/recap/02_set_label.sh <task> <tag> <ep> success\|failure` | 评估器在稳定计数触发后就结束,看不到试管后来掉出;改标签三处同步 |
 | 2-4 数据池 | `bash launch/recap/03_build_pool.sh <task> <tag> <专家目录> [expert_episodes]` | 专家 v2.1→v3.0(指纹缓存,边车随带)→ 可选前 N 集子集 → 合并 `[专家, rollout]` → 写 `episode_success`。round1 用 200 专家:150 rollout |
 | 5 价值训练 | `bash launch/recap/04_value_train.sh <task> <tag> [steps=8000] [bs=64]` | 脱离会话;bs64 ≈ 27.5GB、5.4 s/步;1 epoch(350 集)≈2500 步;不必训满 |
-| 6a 质检选档 | `bash launch/recap/05_value_qc.sh <task> <tag> 002000 003000 004000` | 60 集子集,每档 ~10 分钟(GPU 独占);规则:成功−失败首帧 value ≥ 0.3 的档里取 advantage std 最大者 |
+| 6a 质检选档 | `bash launch/recap/05_value_qc.sh <task> <tag> 001500 002000 003000`(只列已存在的档) | 60 集子集,每档 ~10 分钟(GPU 独占);规则:成功−失败首帧 value ≥ 0.3 的档里取 advantage std 最大者 |
 | 停训 | `bash launch/recap/stop.sh lerobot_value_train` | 发布前必须停:阶段 6 会原地改写 merged_v30 |
 | 6b-7 发布 | `setsid nohup bash launch/recap/06_publish.sh <task> <tag> <step> > /tmp/pub.log 2>&1 < /dev/null & disown` | no_reward 与 reward 两版 v2.1 → NAS `recap_{no_,}reward_dataset/simrecap_<task>_<tag>/` + 本地 `lerobot_dataset/simrecap_<task>_<tag>`(链进 pi05 训练目录);三列存活门禁;约 1.5h |
 | 8 ACP 微调 | `bash launch/recap/07_acp_finetune.sh <task> <tag> <exp> [gpu] [权重 params 目录]` | 配置 `pi05_sim_recap` 由环境变量注入 repo_id/indicator/权重;norm stats 按 repo_id 分目录自动算;对照组 `SIMRECAP_INDICATOR_KEY=none` |
-| 9 评估 | `bash launch/recap/08_eval.sh <task> <tag> <exp> [episodes=100]` | 官方 `random`;自动取最新 checkpoint(20k 步只存 10000/19999);推理自动挂 `Advantage: positive` |
-| 下一轮 | `01_rollout.sh <task> round2 pi05_sim_recap <exp> 19999 …` 然后 `03_build_pool.sh <task> round2 lerobot_dataset/simrecap_<task>_round1`(自带边车) | `07` 的权重指向上轮 `checkpoints/pi05_sim_recap/<exp>/19999/params` |
+| 9 评估 | `bash launch/recap/08_eval.sh <task> <tag> <exp> [episodes=100]` | 官方 `random`;自动取最新 checkpoint(20k 步只存 10000/19999);推理自动挂 `Advantage: positive`;对照组模型要 `SIMRECAP_INDICATOR_KEY=none` |
+| 下一轮 | `01_rollout.sh <task> round2 pi05_sim_recap <exp> 19999 …`(自动从 checkpoint assets 推出 SIMRECAP_REPO_ID)然后 `03_build_pool.sh <task> round2 lerobot_dataset/simrecap_<task>_round1`(自带边车;脚本先去掉 complementary_info.* 列) | `07` 的权重指向上轮 `checkpoints/pi05_sim_recap/<exp>/19999/params` |
 
 ## 参考数字(sample_loading round1)
 

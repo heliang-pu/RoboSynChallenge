@@ -16,7 +16,7 @@ lerobot_dataset/
         ├── merged_v30/                    价值训练/推理用的合并池(阶段 6 在此原地写三列)
         ├── qc_v30/                        质检副本(qc<step> 后缀列,可删)
         ├── no_reward_v30/ reward_v30/     发布中间态(转完即 v2.1)
-outputs/value_train/value_<task>_<tag>/checkpoints/000500 … last/
+outputs/value_train/value_<task>_<tag>/checkpoints/000500 … last/   (启动脚本与日志在 value_<task>_<tag>.launch/)
 NAS: /home/phl/FermiBotNas/dataset/RoboSynChallenge/{recap_reward_dataset,recap_no_reward_dataset}/simrecap_<task>_<tag>/
 ```
 
@@ -30,7 +30,7 @@ NAS: /home/phl/FermiBotNas/dataset/RoboSynChallenge/{recap_reward_dataset,recap_
 | `complementary_info.advantage_<tag>` | 帧 | data parquet | Σ50步奖励 + V(t+50) − V(t) | value_infer → 二值化 |
 | `complementary_info.acp_indicator_<tag>` | 帧 | data parquet | 0/1,任务内 top-30% | value_infer → openpi `ACPAdvantageTag`(训练拼 prompt,30% dropout;推理无该键 → 自动 positive) |
 
-- v2.1 的 `episodes.jsonl` 会带上 `episode_success`,但上转器和打标脚本都不读它——**跨轮只认
+- 打过标的合并池转 v2.1 后 `episodes.jsonl` 会带 `episode_success`(rollout 交付版没有),但上转器和打标脚本都不读它——**跨轮只认
   `episode_success.json` 边车**(两个方向的转换器都会丢边车,脚本负责带回);三列是普通数据列,v2.1 原样携带。
 - 合并池布局固定 `[专家…, rollout…]`,rollout 全局索引 = 专家集数 + 边车索引。
 - 价值目标:`g = −剩余步数 − c_fail·[失败]`,`c_fail = 任务内最长集 × 1.0`,归一化到 [-1,0];

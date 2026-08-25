@@ -6,6 +6,7 @@
 #       专家目录若自带 episode_success.json(上一轮发布的合并池),标签按边车恢复,不会把失败集错标成功。
 set -uo pipefail; source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 TASK=${1:?task}; TAG=${2:?tag}; EXPERT=${3:?expert_dataset_dir}; NSUB=${4:-all}
+[[ $NSUB == all || $NSUB =~ ^[0-9]+$ ]] || die "expert_episodes 必须是 all 或整数: $NSUB"
 WORK=$WORK_ROOT/${TASK}_${TAG}; ROLL=$WORK/rollout_v30/rollout_merged
 need_file "$ROLL/meta/info.json"; need_file "$ROLL/episode_success.json"; need_file "$EXPERT/meta/info.json"
 [ -e "$WORK/merged_v30" ] && die "$WORK/merged_v30 已存在;删除后重跑"
@@ -35,13 +36,38 @@ case "$ver" in
         "$PY_SIM" -m lerobot.datasets.v30.convert_dataset_v21_to_v30 --repo-id "expert_v30_$fp" --root "$WORK_ROOT/_cache" --push-to-hub false || die "上转失败"
         [ -f "$EXPERT/episode_success.json" ] && cp "$EXPERT/episode_success.json" "$CACHE/"; echo "$fp" > "$CACHE/.fingerprint"; fi
     EXP_V30=$CACHE ;;
-  v3*) EXP_V30=$EXPERT ;;
+  v3*)
+    fp=$("$PY_SIM" -c "import hashlib,os;p=os.path.realpath('$EXPERT');print(hashlib.sha1((p+open(p+'/meta/info.json').read()).encode()).hexdigest()[:16])")
+    CACHE=$WORK_ROOT/_cache/expert_v30_$fp
+    if [ -f "$CACHE/.fingerprint" ]; then log "专家缓存命中: $CACHE"; else
+        log "专家 v3.0 复制进缓存(不原地改写源目录)"; rm -rf "$CACHE"; mkdir -p "$WORK_ROOT/_cache"; cp -r "$EXPERT" "$CACHE"; echo "$fp" > "$CACHE/.fingerprint"; fi
+    EXP_V30=$CACHE ;;
   *) die "无法识别专家数据版本 '$ver'" ;;
 esac
+[ -f "$EXPERT/episode_success.json" ] && cp "$EXPERT/episode_success.json" "$EXP_V30/episode_success.json"
+# 上一轮发布的 reward 池带 complementary_info.* 三列,新 rollout 没有 → 合并会因 features 不同失败;去掉这些列
+if "$PY_SIM" -c "import json,sys;f=json.load(open('$EXP_V30/meta/info.json'))['features'];sys.exit(0 if any(k.startswith('complementary_info.') for k in f) else 1)"; then
+    CLEAN=${EXP_V30}_noci
+    if [ ! -f "$CLEAN/.fingerprint" ]; then
+        log "去掉专家池中的 complementary_info.* 列 -> $(basename "$CLEAN")"; rm -rf "$CLEAN"
+        PYTHONPATH="$EVO_SRC" "$PY_EVO" - "$EXP_V30" "$CLEAN" <<'PYEOF' || die "去列失败"
+import sys, json, shutil, os
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.dataset_tools import remove_feature
+src, out = sys.argv[1], sys.argv[2]
+feats = [k for k in json.load(open(f"{src}/meta/info.json"))["features"] if k.startswith("complementary_info.")]
+ds = LeRobotDataset("local/expert", root=src)
+remove_feature(ds, feature_names=feats, output_dir=out)
+print("  已去列:", feats)
+PYEOF
+        [ -f "$EXP_V30/episode_success.json" ] && cp "$EXP_V30/episode_success.json" "$CLEAN/"; echo ok > "$CLEAN/.fingerprint"
+    else log "去列缓存命中: $CLEAN"; [ -f "$EXP_V30/episode_success.json" ] && cp "$EXP_V30/episode_success.json" "$CLEAN/"; fi
+    EXP_V30=$CLEAN
+fi
 ntot=$("$PY_SIM" -c "import json;print(json.load(open('$EXP_V30/meta/info.json'))['total_episodes'])")
 
 # --- 可选子集(前 N 集) ---
-rm -rf "$WORK/expert_v30"
+rm -rf "$WORK/expert_v30" "$WORK/expert_v30_splits"
 if [ "$NSUB" != all ] && [ "$NSUB" -lt "$ntot" ]; then
     log "专家取前 $NSUB/$ntot 集 -> expert_v30"
     PYTHONPATH="$EVO_SRC" "$PY_EVO" - "$EXP_V30" "$WORK/expert_v30" "$NSUB" <<'PYEOF' || die "取子集失败"
@@ -60,7 +86,7 @@ import json; sc=json.load(open('$EXP_V30/episode_success.json')); sc['episodes']
 else ln -sfn "$EXP_V30" "$WORK/expert_v30"; NEXP=$ntot; fi
 
 # --- 合并 [专家, rollout] ---
-strip_meta "$WORK/expert_v30"; strip_meta "$ROLL"
+strip_meta "$(readlink -f "$WORK/expert_v30")"; strip_meta "$ROLL"
 log "合并 expert_v30($NEXP) + rollout($(basename "$ROLL")) -> merged_v30"
 merge_v30 "$WORK" merged_v30 expert_v30 "rollout_v30/rollout_merged" || die "合并失败"
 

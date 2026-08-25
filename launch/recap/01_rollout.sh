@@ -10,12 +10,20 @@ TASK=${1:?task}; TAG=${2:?tag}; CFG=${3:?train_config}; MODEL=${4:?model_name}; 
 SHARDS=${7:-2}; GPU=${8:-0}; SETTING=${9:-random_rollout}
 WORK=$WORK_ROOT/${TASK}_${TAG}; SH=$WORK/shards; DELIVER=$REPO/lerobot_dataset/rollouts/${TASK}_${TAG}
 [ -e "$WORK/rollout_v30" ] && die "$WORK/rollout_v30 已存在;换 tag 或删除后重跑"
+[ -e "$SH" ] && die "$SH 已存在(上次半途产物);删除后重跑"
+# 用 pi05_sim_recap 训出的策略做 rollout 时,配置由环境变量驱动:repo_id 必须与 checkpoint 内 assets 的 norm stats 一致
+if [ "$CFG" = pi05_sim_recap ]; then
+    A=$REPO/policy/pi05/checkpoints/$CFG/$MODEL/$CKPT/assets
+    ns=$(cd "$A" 2>/dev/null && find . -name norm_stats.json | head -1); [ -n "$ns" ] || die "找不到 $A 下的 norm_stats.json"
+    export SIMRECAP_REPO_ID=$(dirname "$ns" | sed 's#^\./##'); export SIMRECAP_INDICATOR_KEY=${SIMRECAP_INDICATOR_KEY:-complementary_info.acp_indicator_$TAG}
+    log "pi05_sim_recap: SIMRECAP_REPO_ID=$SIMRECAP_REPO_ID"
+fi
 need_file "$REPO/configs/$TASK/$SETTING/gym_config.json"
 mkdir -p "$SH"
 FRAC=$(awk -v s="$SHARDS" 'BEGIN{printf "%.2f", (s>1)?0.32:0.4}')
 per=$(( (EPISODES + SHARDS - 1) / SHARDS )); pids=()
 for i in $(seq 0 $((SHARDS-1))); do
-    n=$(( i < SHARDS-1 ? per : EPISODES - per*(SHARDS-1) )); [ $n -le 0 ] && continue
+    n=$(( EPISODES - per*i )); [ $n -gt $per ] && n=$per; [ $n -le 0 ] && continue
     log "启动分片 s$i: $n 集, seed $((10001*(i+1))), 显存池 $FRAC"
     ( cd "$REPO/policy/pi05" && XLA_PYTHON_CLIENT_MEM_FRACTION=$FRAC bash eval.sh "$TASK" "$SETTING" "$CFG" "$MODEL" "$GPU" \
         --checkpoint_id "$CKPT" --max_episodes "$n" --seed $((10001*(i+1))) --headless True \

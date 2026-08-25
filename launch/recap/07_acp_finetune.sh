@@ -18,13 +18,16 @@ cd "$PI05"
 if [ ! -f "assets/pi05_sim_recap/$SIMRECAP_REPO_ID/norm_stats.json" ]; then
     log "计算 norm stats(按 repo_id 分目录)"; uv run --frozen scripts/compute_norm_stats.py --config-name pi05_sim_recap || die "norm stats 失败"
 fi
-OUT=$PI05/checkpoints/pi05_sim_recap/$EXP; mkdir -p "$OUT"
-cat > "$OUT/train_cmd.sh" <<EOS
+OUT=$PI05/checkpoints/pi05_sim_recap/$EXP
+[ -e "$OUT" ] && die "$OUT 已存在(会被训练器清空);换 exp_name 或手动删除"
+# 启动脚本与日志放旁边的 .launch 目录:openpi 会清空/重建 checkpoint 目录
+LAUNCH=${OUT}.launch; mkdir -p "$LAUNCH"
+cat > "$LAUNCH/train_cmd.sh" <<EOS
 #!/usr/bin/env bash
 cd "$PI05"; export SIMRECAP_REPO_ID="$SIMRECAP_REPO_ID" SIMRECAP_INDICATOR_KEY="$SIMRECAP_INDICATOR_KEY" SIMRECAP_WEIGHTS="$SIMRECAP_WEIGHTS"
 export HF_LEROBOT_HOME="$HF_LEROBOT_HOME" CUDA_VISIBLE_DEVICES=$GPU XLA_PYTHON_CLIENT_MEM_FRACTION=0.9
-exec uv run --frozen scripts/train.py pi05_sim_recap --exp-name="$EXP" --overwrite
+exec uv run --frozen scripts/train.py pi05_sim_recap --exp-name="$EXP"
 EOS
-chmod +x "$OUT/train_cmd.sh"; pid=$(detach "$OUT/train.log" bash "$OUT/train_cmd.sh")
-log "已脱离会话启动 pid=$pid  日志: $OUT/train.log  indicator=$SIMRECAP_INDICATOR_KEY"
+chmod +x "$LAUNCH/train_cmd.sh"; pid=$(detach "$LAUNCH/train.log" bash "$LAUNCH/train_cmd.sh")
+log "已脱离会话启动 pid=$pid  日志: $LAUNCH/train.log  indicator=$SIMRECAP_INDICATOR_KEY"
 log "训完评估: 08_eval.sh $TASK $TAG $EXP"
