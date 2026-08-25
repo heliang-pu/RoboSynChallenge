@@ -59,7 +59,7 @@ for n in "${LEVELS[@]}"; do
     "$RLINF_VENV_PYTHON" "$ROBOSYN_PATH/scripts/bench_env_throughput.py" \
         --task "$TASK" --num-envs "$n" "${@:3}" > "$TMP_LOG" 2>&1
 
-    line="$(grep -a -m1 '^BENCH_RESULT' "$TMP_LOG" || true)"
+    line="$(grep -a -m1 -oE 'BENCH_RESULT.*' "$TMP_LOG" || true)"
     if [[ -z "$line" ]]; then
         # 没拿到结果:要么 OOM,要么引擎在建环境阶段就退了。把最后一条像样的错误摘出来。
         reason="$(grep -a -oiE '(CUDA out of memory|RuntimeError:.*|AttributeError:.*|ValueError:.*|KeyError:.*)' "$TMP_LOG" | tail -1)"

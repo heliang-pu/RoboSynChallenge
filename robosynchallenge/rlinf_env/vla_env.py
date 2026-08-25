@@ -217,6 +217,10 @@ class RoboSynChallengeVLAEnv(EmbodiChainEnv):
             headless=bool(_cfg_get(self.cfg, "headless", True)),
             sim_device=self._sim_device,
             gpu_id=self._gpu_id,
+            # SimulationManagerCfg.cpu_num 默认 1 —— 引擎单核跑物理,这是并行扩展性
+            # 平坦的主因(1->32 envs 吞吐基本不变)。给每个引擎实例几个核;RLinf 会起
+            # 多个 env worker 进程,总核数 = worker 数 x sim_cpu_num,别超机器核数。
+            cpu_num=int(_cfg_get(self.cfg, "sim_cpu_num", 4)),
         )
         env = build_env(gym_config["id"], base_env_cfg=env_cfg)
 
