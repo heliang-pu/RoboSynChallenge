@@ -209,6 +209,36 @@ RLinf 自带的 EmbodiChain 适配器只产出 `{"states": ...}`（它是为 Car
 SFT checkpoint 是用 `libero_policy.EmbodiChainInputs` 训的，不做这个变换。混用**不会报错**，
 只会让动作空间悄悄错位。
 
+## EmbodiChain 需要两处本地补丁才能跑 num_envs>1
+
+这两处改在 `~/workspace/EmbodiChain` 工作区里（**未提交** —— 那是 DexForce 的仓库），
+如果重新 checkout 或升级 EmbodiChain 就会丢，PPO 会在并行 rollout 时"莫名"崩掉。
+两处都值得整理成最小复现提给 DexForce。
+
+**1. `managers/events.py` `get_pose()`：高级索引误用**
+
+```python
+# 原来:两个索引张量逐元素配对,N=1 时 [1]x[6] 碰巧广播成功,N=4 时直接 IndexError
+entity.get_qpos()[env_ids, entity.get_joint_ids(control_part)]
+# 修为:先取行再取列
+entity.get_qpos()[env_ids][:, entity.get_joint_ids(control_part)]
+```
+
+**2. `randomization/spatial.py` + `events.py`：FK/IK 未透传 `env_ids`（部分重置崩溃）**
+
+`randomize_robot_eef_pose` 把 qpos 切成 `len(env_ids)` 行，但调 `compute_fk` / `compute_ik`
+时不传 `env_ids`，它们默认按全部环境校验 batch。**全量 reset 时两者相等，测不出来**；
+episode 中途只有部分环境终止、auto-reset 只带子集时报
+`Joint positions batch size mismatch. Expected 32 but got 2`。
+
+这个 bug 的表现极具迷惑性：短测（几步内没有环境终止）永远通过，长测必崩 ——
+看起来像"引擎不稳定"，实际是确定性 bug。验证方式：8 环境 × 120 步随机动作
+（随机动作让环境频繁终止，部分重置持续发生），修复后全程无崩溃。
+
+**排障心得**：dexsim 引擎崩溃经常不产生 Python traceback（C++ 层直接终止进程，
+退出码可能还是 0）。所以失败日志必须保留 —— `launch/rlinf_bench_envs.sh` 会把失败档位的
+完整日志存到 `/tmp/rsc_bench_failures/`，别删。
+
 ## 成功率不对劲时第一个该查的地方
 
 mixer_operating 的按钮位置偏移量在两个版本里不一致：
