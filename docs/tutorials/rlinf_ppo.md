@@ -239,6 +239,23 @@ episode 中途只有部分环境终止、auto-reset 只带子集时报
 退出码可能还是 0）。所以失败日志必须保留 —— `launch/rlinf_bench_envs.sh` 会把失败档位的
 完整日志存到 `/tmp/rsc_bench_failures/`，别删。
 
+## Known issue：上游新版 eval 在本机确定性崩溃（不影响 PPO）
+
+上游 `d3161d4..84b6c0e` 合并后的评测代码，在**策略+仿真同一进程**（torch CUDA + JAX +
+Vulkan 混跑，即 `scripts/eval_policy.py` 的 legacy 形态）下，dexsim 引擎累计 ~1000 步后
+必崩：无 traceback、退出码 0、总死在第 3 集附近，3/3 复现。
+
+二分排除了：我们的任务修复、EmbodiChain 修复、上游的每步 `is_task_success` 检查、
+计时代码的 `cuda.synchronize` —— 逐一还原都照崩；只有整体退回 merge 前 eval 代码才稳
+（6/6）。触发点在上游 `eval_policy.py` 的 +224 行里，未继续细分。
+
+**为什么不挡 PPO**：RLinf 的 env worker 是纯仿真进程。同等调用强度（每步双重成功检查
+× 1500 步）在纯仿真进程里实测无恙 —— 崩溃需要混合运行时这个条件，而 PPO 架构里
+策略推理（rollout worker）和仿真（env worker）天然分进程。
+
+**本机跑评测**：用 `launch/run_regression_eval.sh`（临时切 merge 前代码，trap 自动还原，
+上游文件不留改动）。
+
 ## 成功率不对劲时第一个该查的地方
 
 mixer_operating 的按钮位置偏移量在两个版本里不一致：
