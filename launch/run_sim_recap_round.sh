@@ -167,12 +167,14 @@ if [[ "$START_STAGE" -le 3 ]]; then
     # 读写路径在 pandas 2/3 下各自崩掉(实测)。幂等,可重复执行。
     "$SIM_PYTHON" - <<PYEOF
 import glob
+import os
 import pyarrow as pa
 import pyarrow.parquet as pq
 n = 0
 for d in ["$EXPERT_V30_DIR", "$ROLLOUT_DS_DIR"]:
     for f in sorted(glob.glob(f"{d}/meta/**/*.parquet", recursive=True)) + \
              sorted(glob.glob(f"{d}/data/**/*.parquet", recursive=True)):
+        if os.path.basename(f) == "tasks.parquet": continue  # 任务字符串在 pandas 索引里,剥元数据会丢
         t = pq.read_table(f)
         if not (t.schema.metadata or any(fld.metadata for fld in t.schema)):
             continue

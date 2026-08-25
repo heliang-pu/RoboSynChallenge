@@ -99,7 +99,8 @@ assets 推出 `SIMRECAP_REPO_ID`),`03_build_pool.sh sample_loading round2 lerobo
 - **杀进程把自己杀了**:`pgrep -f` 会匹配当前 shell;用 `launch/recap/stop.sh`(排除自身),或 `'xx[x]'` 括号技巧。
 - **显存被幽灵占用**:杀 eval/采集主进程后 image-writer 子进程存活;`stop.sh` 会列出仍持卡的 PID,逐个清。
 - **merge 报 HF Hub 404 / 找不到 info.json**:`--root` 传法错误;脚本已用 `HF_LEROBOT_HOME`。`collect_parallel_validated.sh:109` 是错误示范,别照抄。
-- **merge/convert 在 pandas 上崩**:parquet 带 HF 扩展 dtype;脚本会先剥元数据(`_common.sh strip_meta`)。
+- **merge/convert 在 pandas 上崩**:parquet 带 HF 扩展 dtype;脚本会先剥元数据(`_common.sh strip_meta`,已跳过 `tasks.parquet` 以免丢任务指令)。
+- **任务指令变成 0**:v2.1 的 `meta/tasks.jsonl` 若 task 是数字而非指令句,是 strip_meta 丢了 tasks.parquet 的索引元数据所致(已修);单任务可直接重写 tasks.jsonl。
 - **训练被会话重启杀掉**:脚本用 `setsid nohup` 脱离;自己起长任务也要这样。
 - **wandb 404**:机器 `~/.netrc` 账号与浏览器账号不一致;`wandb login --relogin <key>` 后重启训练。当前登录 `puheliang`。
 - **价值训练目录已存在**:`FileExistsError`(训练器要求 output_dir 不存在,启动脚本/日志放在旁边的 `.launch` 目录);删除或 `--resume=true --config_path=.../checkpoints/last/pretrained_model/value_train_config.json`。

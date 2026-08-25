@@ -27,6 +27,7 @@ import sys, glob, os
 import pyarrow as pa, pyarrow.parquet as pq
 d = sys.argv[1]; n = 0
 for f in sorted(glob.glob(f"{d}/meta/**/*.parquet", recursive=True)) + sorted(glob.glob(f"{d}/data/**/*.parquet", recursive=True)):
+    if os.path.basename(f) == "tasks.parquet": continue  # 任务字符串在 pandas 索引里,剥元数据会丢
     t = pq.read_table(f)
     if not (t.schema.metadata or any(fl.metadata for fl in t.schema)): continue
     t2 = pa.Table.from_arrays([t.column(i) for i in range(t.num_columns)], schema=pa.schema([pa.field(fl.name, fl.type, fl.nullable) for fl in t.schema]))

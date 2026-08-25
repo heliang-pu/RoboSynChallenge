@@ -67,3 +67,8 @@
     `grep -rl '/home/phl/' <ckpt>/ --include='*.json' | xargs sed -i 's#/home/phl/#/home/<user>/#g'`,
     否则 transformers 把路径当 HF repo id 报 `HFValidationError`。远端 evo-rl 环境还需手动
     `pip install transformers==4.53.3 scipy`(Evo-RL 的依赖表没带)。
+25. **strip_meta 会丢任务指令文本**:v3.0 的 `meta/tasks.parquet` 把任务字符串存在 pandas 索引
+    (`__index_level_0__`)里;strip_meta 重建表时丢掉"索引列"元数据,转 v2.1 后 `tasks.jsonl`
+    的 task 退化成 `0`。因 `prompt_from_task=True`,训练 prompt 变成 "0" 而评估用真实指令 →
+    训练/评估不一致。strip_meta 现在跳过 `tasks.parquet`。已交付数据集可直接重写 tasks.jsonl
+    (单任务时指令已知)。合并前剥分片元数据也会经此丢失,同样已修。
