@@ -269,13 +269,35 @@ x 的符号相反，y/z 也都改了 —— 是有人重新标定过，不是笔
 - **GPU 仿真是支持的**。`sim_device="cpu"` 只是 `SimulationManagerCfg` 的默认值，单环境评测路径
   没去覆盖它；EmbodiChain 自带的 push_cube RL 配置写的是 `"device": "cuda:0"` + `num_envs: 64`。
 
+## 并行吞吐实测（定 total_num_envs 的依据）
+
+4090、`sim_cpu_num=4`、随机动作（部分重置频发的最坏情形）、干净 GPU：
+
+| per-instance envs | 1 | 4 | 8 | 16 | 32 | 64 |
+|---|---|---|---|---|---|---|
+| env-steps/s | 18.5 | 29.9 | 25.3 | 22.0 | 13.5 | 崩 |
+| ms/step | 54 | 134 | 316 | 727 | 2375 | — |
+
+三条结论：
+
+1. **单实例甜点是 4-8 env**，16 起边际为负，32 比单环境还慢。并行度靠 RLinf 多 env worker
+   进程扩（每 worker 4-8 env），不是单实例堆环境。`total_num_envs: 64` = 8 worker × 8 env。
+2. **显存无关紧要**（单实例 ~50MB torch 分配），瓶颈是 CPU：worker 数 × `sim_cpu_num`
+   别超机器核数。`sim_cpu_num` 是我们加进 env 配置的旋钮 —— 引擎默认**单核**跑物理。
+3. 两个硬上限：16 env 起 PhysX 警告 `foundLostPairsCapacity` 不足**可能漏碰撞**（物理质量
+   劣化）；64 env × 3 相机直接把 Vulkan 纹理分配打爆（`DFTextureVK.cpp:129 RT_FAIL`）。
+
+测量纪律（血泪换来的）：一档一进程（引擎 `close()` 会杀进程）；结果在 close 前打印；
+失败日志保留（`/tmp/rsc_bench_failures/`）；测前 `pgrep -af bench_env_throughput` 查僵尸 ——
+一个挂死的旧进程占着 GPU 能把所有数字压低 2 倍还不留痕迹。
+
 ## 还没做完的
 
-- **RLinf venv 没装**，所以端到端训练还没真正跑起来。上面的链路（配置解析、补丁、前置检查）
-  都验过，但只到 `--dry-run`。
-- **`total_num_envs` 是照抄 robotwin 的占位值 256，没有实测依据**。RLinf 的 EmbodiChain 例子是
-  无渲染 CartPole，LIBERO 是轻量渲染 + 200 步 episode，都不可比；这里是三路 640×480 相机 +
-  500 步 + 每 10 步随机光照。这个数定不下来，所有 batch size 都是猜的。需要先测带渲染时
-  `num_envs` 从 1→8→16→32→64 的 FPS 和显存曲线。
+- **端到端 PPO 只到冒烟前夜**：`bash launch/rlinf_train.sh smoke`（单卡、2 env、一次更新）
+  配置就绪、dry-run 通过，但还没实跑。
+- **其余 9 个任务未做向量化修复**。审计结论（一次 10 agent 并行审计）：全部任务都有
+  num_envs>1 问题，PPO 路径上共约 35 处需修；mixer_operating 已修并实测。修法参照
+  `ae79cf6` 那次提交的思路：保持 (num_envs, ...) 形状、latch 用 per-env 张量、
+  按 reset_ids 逐环境清零。
 - **`num_steps`（flow 积分步数）、`noise_level` 用的是 robotwin 的值**（5 / 0.3），没有针对
   RoboSynChallenge 调过。
