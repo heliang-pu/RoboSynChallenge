@@ -53,9 +53,10 @@ fi
 EMBODICHAIN_ROOT="${EMBODICHAIN_ROOT:-}"
 
 case "$MODE" in
-    ppo)  CONFIG_NAME="robosynchallenge_ppo_pi05" ;;
-    grpo) CONFIG_NAME="robosynchallenge_grpo_pi05" ;;
-    *)    echo "用法: $0 {ppo|grpo} [额外参数...]" >&2; exit 1 ;;
+    ppo)   CONFIG_NAME="robosynchallenge_ppo_pi05" ;;
+    grpo)  CONFIG_NAME="robosynchallenge_grpo_pi05" ;;
+    smoke) CONFIG_NAME="robosynchallenge_ppo_pi05_smoke" ;;   # 单卡冒烟,验管线不训模型
+    *)     echo "用法: $0 {ppo|grpo|smoke} [额外参数...]" >&2; exit 1 ;;
 esac
 
 DRY_RUN=0

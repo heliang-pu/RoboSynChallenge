@@ -1,0 +1,41 @@
+# ----------------------------------------------------------------------------
+# 单卡冒烟测试:验证 RLinf 整条管线(Ray 编排 -> env worker -> rollout -> 一次 PPO
+# 更新 -> checkpoint 落盘)能在本机(1x4090)端到端走通。
+#
+#   bash launch/rlinf_train.sh smoke
+#
+# 不是为了训出任何东西——规模压到最小,跑通即胜利。真训练用 8xH100 的
+# robosynchallenge_ppo_pi05.yaml。
+# ----------------------------------------------------------------------------
+defaults:
+  - robosynchallenge_ppo_pi05
+  - _self_
+
+cluster:
+  component_placement:
+    actor, env, rollout: 0-0        # 全部组件挤单卡
+
+runner:
+  logger:
+    experiment_name: "smoke_ppo_pi05"
+  max_epochs: 1                     # 一轮 rollout + 一次更新就停
+  val_check_interval: -1            # 冒烟不评测
+  save_interval: 1
+
+algorithm:
+  update_epoch: 1
+
+env:
+  train:
+    total_num_envs: 2
+    rollout_epoch: 1
+    max_steps_per_rollout_epoch: 100   # 2 个 chunk(50 步/chunk)就够验证数据流
+    sim_cpu_num: 4
+  eval:
+    total_num_envs: 1
+    sim_cpu_num: 4
+
+actor:
+  micro_batch_size: 1
+  global_batch_size: 4              # 2 envs x 2 chunks
+  enable_offload: True
