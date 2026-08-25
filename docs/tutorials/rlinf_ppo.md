@@ -335,9 +335,21 @@ checkpoint 在其下 `<experiment_name>/checkpoints/global_step_<N>/actor/model_
 是现成起点），这一步还没做。
 
 ## 还没做完的
-- **其余 9 个任务未做向量化修复**。审计结论（一次 10 agent 并行审计）：全部任务都有
-  num_envs>1 问题，PPO 路径上共约 35 处需修；mixer_operating 已修并实测。修法参照
-  `ae79cf6` 那次提交的思路：保持 (num_envs, ...) 形状、latch 用 per-env 张量、
-  按 reset_ids 逐环境清零。
+- **其余 8 个任务未做向量化修复**。审计结论（一次 10 agent 并行审计）：全部任务都有
+  num_envs>1 问题，PPO 路径上共约 35 处需修；**mixer_operating、sample_loading 已修并实测**
+  （8 env × 120 步含部分重置）。修法参照 `ae79cf6` / `d6e58b4` 两次提交：保持 (num_envs, ...)
+  形状、latch 用 per-env 张量、按 reset_ids 逐环境清零。新任务第一次跑 8 env 时还可能撞到
+  EmbodiChain 里新的单环境假设（sample_loading 就撞出了第三处），用
+  `launch/rlinf_bench_envs.sh <task> 8 --steps 120` 先验。
+
+## 单卡探针
+
+```bash
+ROBOSYN_TASK=sample_loading ROBOSYN_PI05_TORCH_CKPT=<该任务转换后的 ckpt> \
+  bash launch/rlinf_train.sh probe
+```
+
+一张 48GB 卡上的真实（但慢的）PPO：8 env、batch 160、优化器 offload 到内存（内存 ≥64GB）、
+每 iteration 约 10-15 分钟。用来在烧 H100 之前回答"这个任务上 PPO 涨不涨"。
 - **`num_steps`（flow 积分步数）、`noise_level` 用的是 robotwin 的值**（5 / 0.3），没有针对
   RoboSynChallenge 调过。
