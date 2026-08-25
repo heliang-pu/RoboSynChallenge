@@ -30,6 +30,10 @@ class PI0:
         self.train_config_name = train_config_name
         self.model_name = model_name
         self.checkpoint_id = checkpoint_id
+        # deploy_policy.eval() 用它给 start_inference/finish_inference 做 cuda 同步，
+        # 否则测出来的是 kernel 入队时间而不是推理时间。JAX 路径下这个值不参与计算，
+        # 但属性必须在——上游的 deploy_policy.py 无条件读 model.pytorch_device。
+        self.pytorch_device = pytorch_device
 
         specified_path = f"policy/pi05/checkpoints/{self.train_config_name}/{self.model_name}/{self.checkpoint_id}/assets/"
         entries = os.listdir(specified_path)
