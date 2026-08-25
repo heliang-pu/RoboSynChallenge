@@ -196,6 +196,15 @@ actor:
       noise_method: "flow_sde"    # ODE 转 SDE 注噪,让 flow 有可算的 log-prob
       detach_critic_input: True
 
+    # norm_stats 的位置。RLinf 默认按 <model_path>/<asset_id>/norm_stats.json 找,
+    # 而 openpi 训练产物(以及 scripts/convert_pi05_jax_to_torch.py 的输出)的布局是
+    # <model_path>/assets/<asset_id>/norm_stats.json —— 差一层 assets/,不指定就
+    # FileNotFoundError。换任务时这里要跟着改成对应任务的 asset 目录:
+    # 归一化统计量是按任务算的,用错任务的会让策略输出整体偏移且不报错。
+    # 这个块只能放 norm_stats_path 一个键:其余键会被原样塞进 openpi 的 DataConfig。
+    openpi_data:
+      norm_stats_path: ${actor.model.model_path}/assets/RoboSynChallenge/cobotmagic_Sim_mixer_operating
+
   optim:
     lr: 5.0e-06
     value_lr: 1.0e-04
