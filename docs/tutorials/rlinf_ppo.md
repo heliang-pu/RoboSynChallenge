@@ -144,9 +144,15 @@ max_episode_steps: <官方值>
 | click_bell / table_rearrangement | 361 |
 | drawer_open_place | 900 |
 
-同时把 `robosynchallenge/rlinf_env/dataconfig.py` 里 `register()` 的 `repo_id` 换成对应任务
-（决定 norm_stats 在 `<checkpoint>/assets/<repo_id>/` 下的查找路径，换错会加载到别的任务的
-归一化统计量）。
+同时改两处 norm_stats 相关的：
+
+- yaml 里 `actor.model.openpi_data.norm_stats_path` 指到对应任务的 asset 目录
+  （`<ckpt>/assets/RoboSynChallenge/cobotmagic_Sim_<task>`）。RLinf 默认按
+  `<model_path>/<asset_id>/` 找，openpi 的布局多一层 `assets/`，不指定直接
+  `FileNotFoundError`。这个块**只能放这一个键**，其余键会被原样塞进 openpi 的 DataConfig。
+- `robosynchallenge/rlinf_env/dataconfig.py` 里 `register()` 的 `repo_id` 换成对应任务。
+
+归一化统计量是按任务算的，用错任务的会让策略输出整体偏移且不报错。
 
 ### 先打哪个任务
 
