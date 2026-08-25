@@ -69,7 +69,16 @@ echo "=== 3/4 把 embodichain 换成本地 editable ==="
 # 任务代码和它可能对不上。
 # --no-deps: 依赖已由 wheel 那步装齐,重新解析只会引入无谓的版本变动。
 uv pip install -e "$EMBODICHAIN_ROOT" --no-deps
-echo "embodichain -> $("$PY" -c 'import embodichain; print(embodichain.__file__)')"
+
+# embodichain_tasks 是同一个仓库里的**独立**包(EmbodiChain/embodichain_tasks/ 有自己的
+# pyproject.toml),不会被上面那条带进去。不装它的话:PYTHONPATH 上的
+# EmbodiChain/embodichain_tasks 这个外层目录会作为命名空间包劫持掉真正的
+# embodichain_tasks/embodichain_tasks/,于是 `from embodichain_tasks.tableware.base_agent_env
+# import BaseAgentEnv` 报 ModuleNotFoundError —— 而 robosynchallenge 的多个任务都 import 它。
+uv pip install -e "$EMBODICHAIN_ROOT/embodichain_tasks" --no-deps
+
+echo "embodichain       -> $("$PY" -c 'import embodichain; print(embodichain.__file__)')"
+echo "embodichain_tasks -> $("$PY" -c 'import embodichain_tasks.tableware as m; print(m.__file__)')"
 
 echo
 echo "=== 4/4 让 robosynchallenge 可被 import ==="
@@ -83,8 +92,12 @@ echo "已写入 $SITE_PACKAGES/robosynchallenge.pth -> $ROBOSYN_PATH"
 
 echo
 echo "=== 校验 ==="
-"$PY" - <<'PYEOF'
-import importlib, sys
+# RLinf 本身不作为包安装 —— run_embodiment.sh 是靠 PYTHONPATH=$REPO_PATH 用源码的。
+# 校验必须照做,否则 import rlinf 会失败,看起来像环境坏了。
+RLINF_ROOT="$RLINF_ROOT" "$PY" - <<'PYEOF'
+import importlib, os, sys
+
+sys.path.insert(0, os.environ["RLINF_ROOT"])
 
 failures = []
 for mod, note in [
