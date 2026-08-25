@@ -10,22 +10,27 @@
 缩放到 224、以及每步调用官方 ``is_task_success()`` 的开销。动作用随机采样——
 这里量的是环境侧吞吐,不是策略质量。
 
-用法(在 RLinf 的 venv 里)::
+**一次只测一档**。dexsim 引擎在 ``env.close()`` 时会让整个进程退出(现象是没有
+traceback、退出码 0、后面的代码全不执行),所以同一进程里连测多档,第一次关闭就断了。
+用 ``launch/rlinf_bench_envs.sh`` 循环调用本脚本,每档一个独立进程。
 
-    python scripts/bench_env_throughput.py --task mixer_operating --envs 1,4,8,16,32,64
+结果在关闭环境**之前**打印,原因同上。
 
-输出每档的 env-steps/s、每步耗时和显存峰值。挑显存有余量(给 actor 和 rollout 留位置)
-且 FPS 还在近似线性增长的那一档。
+用法::
+
+    python scripts/bench_env_throughput.py --task mixer_operating --num-envs 8
 """
 
 from __future__ import annotations
 
 import argparse
-import gc
 import os
 import time
 
 import torch
+
+# 让外层脚本能稳定解析,不受引擎日志刷屏干扰
+RESULT_PREFIX = "BENCH_RESULT"
 
 
 def build_env(task: str, setting: str, num_envs: int, image_size: int, device: str):
@@ -51,91 +56,57 @@ def build_env(task: str, setting: str, num_envs: int, image_size: int, device: s
     )
 
 
-def bench_one(task: str, setting: str, num_envs: int, steps: int, warmup: int,
-              image_size: int, device: str) -> dict:
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.reset_peak_memory_stats()
-
-    env = build_env(task, setting, num_envs, image_size, device)
-    try:
-        env.reset(seed=0)
-        action_dim = int(env.action_space.shape[-1])
-
-        def random_actions():
-            low = env.action_low.reshape(1, -1).expand(num_envs, -1)
-            high = env.action_high.reshape(1, -1).expand(num_envs, -1)
-            return low + (high - low) * torch.rand(
-                (num_envs, action_dim), device=env.device
-            )
-
-        for _ in range(warmup):
-            env.step(random_actions())
-
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        started = time.perf_counter()
-        for _ in range(steps):
-            env.step(random_actions())
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        elapsed = time.perf_counter() - started
-
-        peak_gb = (
-            torch.cuda.max_memory_allocated() / 1024**3 if torch.cuda.is_available() else 0.0
-        )
-        return {
-            "num_envs": num_envs,
-            "env_steps_per_s": num_envs * steps / elapsed,
-            "ms_per_step": 1000.0 * elapsed / steps,
-            "peak_gb": peak_gb,
-        }
-    finally:
-        env.close()
-        del env
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
-
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--task", default="mixer_operating")
     ap.add_argument("--setting", default="random")
-    ap.add_argument("--envs", default="1,4,8,16,32",
-                    help="逗号分隔的 num_envs 档位")
-    ap.add_argument("--steps", type=int, default=50, help="每档计时的步数")
-    ap.add_argument("--warmup", type=int, default=5)
+    ap.add_argument("--num-envs", type=int, required=True)
+    ap.add_argument("--steps", type=int, default=30, help="计时步数")
+    ap.add_argument("--warmup", type=int, default=3)
     ap.add_argument("--image-size", type=int, default=224)
     ap.add_argument("--device", default="cuda")
     args = ap.parse_args()
 
     import robosynchallenge  # noqa: F401  注册 task
 
-    print(f"task={args.task}/{args.setting}  image_size={args.image_size}  device={args.device}")
-    print(f"{'num_envs':>9}{'env-steps/s':>14}{'ms/step':>10}{'peak GB':>10}{'相对 1 env':>12}")
-    print("-" * 55)
+    n = args.num_envs
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
 
-    baseline = None
-    for token in args.envs.split(","):
-        n = int(token.strip())
-        if not n:
-            continue
-        try:
-            r = bench_one(args.task, args.setting, n, args.steps, args.warmup,
-                          args.image_size, args.device)
-        except Exception as exc:  # OOM 或引擎拒绝,记下来继续测更小的档
-            print(f"{n:>9}  失败: {type(exc).__name__}: {str(exc)[:60]}")
-            continue
-        if baseline is None:
-            baseline = r["env_steps_per_s"]
-        speedup = r["env_steps_per_s"] / baseline if baseline else 1.0
-        print(f"{r['num_envs']:>9}{r['env_steps_per_s']:>14.1f}"
-              f"{r['ms_per_step']:>10.1f}{r['peak_gb']:>10.2f}{speedup:>11.1f}x")
+    env = build_env(args.task, args.setting, n, args.image_size, args.device)
+    env.reset(seed=0)
+    action_dim = int(env.action_space.shape[-1])
 
-    print("\n选档参考:取显存仍有余量(actor 和 rollout 也要占卡)且加速比还接近线性的那一档。")
-    print("加速比明显走平说明渲染已经成为瓶颈,再加环境只会拖长每步耗时。")
+    def random_actions():
+        low = env.action_low.reshape(1, -1).expand(n, -1)
+        high = env.action_high.reshape(1, -1).expand(n, -1)
+        return low + (high - low) * torch.rand((n, action_dim), device=env.device)
+
+    for _ in range(args.warmup):
+        env.step(random_actions())
+
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    started = time.perf_counter()
+    for _ in range(args.steps):
+        env.step(random_actions())
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    elapsed = time.perf_counter() - started
+
+    peak_gb = torch.cuda.max_memory_allocated() / 1024**3 if torch.cuda.is_available() else 0.0
+    fps = n * args.steps / elapsed
+    ms = 1000.0 * elapsed / args.steps
+
+    # 必须在 env.close() 之前打印:关闭时引擎会终止进程,之后的代码不会执行。
+    print(f"{RESULT_PREFIX} num_envs={n} fps={fps:.2f} ms_per_step={ms:.2f} peak_gb={peak_gb:.3f}",
+          flush=True)
+
+    try:
+        env.close()
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

@@ -33,6 +33,21 @@ __all__ = ["RoboSynChallengeVLAEnv", "install_official_reward"]
 DEFAULT_MAIN_CAMERA = "cam_high"
 DEFAULT_WRIST_CAMERAS = ("cam_left_wrist", "cam_right_wrist")
 
+# 本仓库扩展了 EmbodiChain 的 manager 体系(自定义 action / dataset / event / observation
+# 的 Functor),gym_config 里按函数名引用它们,例如 mixer_operating 的
+# randomize_distractor_slots -> robosynchallenge.managers.events 里的
+# replace_distractor_slots_from_library。
+#
+# 这些模块不会随 `import robosynchallenge` 自动注册——scripts/eval_policy.py 是把它们
+# 直接塞进 DEFAULT_MANAGER_MODULES 的。RLinf 的 _build_env 只调 get_manager_modules(),
+# 不注册就会在建环境时报 "Function '...' not found"。
+CHALLENGE_MANAGER_MODULES = (
+    "robosynchallenge.managers.actions",
+    "robosynchallenge.managers.datasets",
+    "robosynchallenge.managers.events",
+    "robosynchallenge.managers.observations",
+)
+
 
 def install_official_reward(
     env,
@@ -135,16 +150,75 @@ class RoboSynChallengeVLAEnv(EmbodiChainEnv):
     # -- 环境构建 ---------------------------------------------------------
 
     def _build_env(self):
+        """重写而非调用父类:需要在 config_to_cfg 之前动 gym_config,而父类是在方法内部
+        加载并立即消费它的,没有留插入点。逻辑与
+        ``rlinf/envs/embodichain/embodichain_env.py`` 的同名方法一致,只多两处改动
+        (见下面的注释)。"""
+        from copy import deepcopy
+
+        from embodichain.lab.gym.utils.gym_utils import (
+            config_to_cfg,
+            get_manager_modules,
+            register_manager_modules,
+        )
+        from embodichain.lab.gym.utils.registration import (
+            build_env,
+            discover_task_packages,
+            execute_init_hooks,
+        )
+        from embodichain.lab.sim import SimulationManagerCfg
+        from embodichain.utils.utility import load_config
+
+        from rlinf.envs.embodichain.embodichain_env import _resolve_gym_config_path
+
         # RoboSynChallenge 的任务靠 @register_env 在 import 时注册,但
         # discover_task_packages() 只会导入声明了 "embodichain.tasks" entry point 的包,
         # 而本仓库的 pyproject.toml 没有声明。Ray 会在独立进程里起 env worker,
         # 所以这个 import 必须发生在 worker 进程内,不能只在主进程做一次。
         import robosynchallenge  # noqa: F401
 
-        env = super()._build_env()
+        # 改动 1:注册本仓库的 manager 模块。gym_config 里按函数名引用它们
+        # (如 randomize_distractor_slots),不注册会报 "Function '...' not found"。
+        register_manager_modules(list(CHALLENGE_MANAGER_MODULES))
 
-        # 父类没把 gym_config 留下来,而指令写在里面,这里补一次解析。
-        self._gym_config = self._load_gym_config_dict()
+        gym_config_path_cfg = _cfg_get(self.cfg, "gym_config_path")
+        if not gym_config_path_cfg:
+            raise ValueError("env 配置里缺 gym_config_path。")
+
+        discover_task_packages()
+        execute_init_hooks()
+
+        gym_config_path_str = str(gym_config_path_cfg)
+        if gym_config_path_str.startswith("embodichain_tasks/"):
+            gym_config = load_config(gym_config_path_str)
+        else:
+            gym_config = load_config(str(_resolve_gym_config_path(gym_config_path_str)))
+
+        # 指令写在 gym_config 里,父类不保留它,这里留一份给 _resolve_task_description。
+        self._gym_config = deepcopy(gym_config)
+
+        # 改动 2:剥掉 dataset 段。它是给数据采集用的 LeRobot 录制器,RL rollout 不需要,
+        # 留着有两个问题:每个并行环境都会往磁盘写轨迹(纯浪费),而且它调的
+        # LeRobotDataset.create(metadata_buffer_size=...) 只有 lerobot 0.4.x 有——
+        # RLinf 的 rlinf-openpi 会把 lerobot 降到 0.3.3,于是建环境时直接 RuntimeError。
+        env_section = gym_config.get("env")
+        if isinstance(env_section, dict) and "dataset" in env_section:
+            env_section = dict(env_section)
+            env_section.pop("dataset", None)
+            gym_config = dict(gym_config)
+            gym_config["env"] = env_section
+
+        env_cfg = config_to_cfg(
+            deepcopy(gym_config), manager_modules=get_manager_modules()
+        )
+        env_cfg.num_envs = self.num_envs
+        env_cfg.max_episode_steps = self.max_episode_steps
+        env_cfg.sim_cfg = SimulationManagerCfg(
+            headless=bool(_cfg_get(self.cfg, "headless", True)),
+            sim_device=self._sim_device,
+            gpu_id=self._gpu_id,
+        )
+        env = build_env(gym_config["id"], base_env_cfg=env_cfg)
 
         install_official_reward(
             env,
@@ -153,38 +227,57 @@ class RoboSynChallengeVLAEnv(EmbodiChainEnv):
         )
         return env
 
-    def _load_gym_config_dict(self) -> Optional[dict]:
-        from embodichain.utils.utility import load_config
-
-        from rlinf.envs.embodichain.embodichain_env import _resolve_gym_config_path
-
-        raw = _cfg_get(self.cfg, "gym_config_path")
-        if not raw:
-            return None
-        raw = str(raw)
-        try:
-            if raw.startswith("embodichain_tasks/"):
-                return load_config(raw)
-            return load_config(str(_resolve_gym_config_path(raw)))
-        except Exception:
-            return None
+    @staticmethod
+    def _instruction_to_text(value: Any) -> Optional[str]:
+        """指令可能是纯字符串,也可能是 {"lang": "..."} 这样的多语言字典。"""
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, dict):
+            for key in ("lang", "en", "text"):
+                text = value.get(key)
+                if isinstance(text, str) and text.strip():
+                    return text.strip()
+            for text in value.values():
+                if isinstance(text, str) and text.strip():
+                    return text.strip()
+        return None
 
     def _resolve_task_description(self) -> str:
         if self._configured_description:
             return str(self._configured_description)
 
         cfg = self._gym_config or {}
-        # scripts/eval_policy.py 的 extract_instruction_from_gym_config 从这两处取指令
+
+        # 指令写在 dataset 录制器的参数里:env.dataset.<functor>.params.instruction,
+        # 值形如 {"lang": "Pick the beaker, ..."}。规则与
+        # scripts/eval_policy.py 的 extract_instruction_from_gym_config 一致。
+        #
+        # 注意 _build_env 会为 RL 剥掉 dataset 段(见那里的注释),所以这里读的是
+        # self._gym_config —— 剥之前留的那份副本。顺序反了就会拿不到指令。
+        dataset_cfg = (cfg.get("env") or {}).get("dataset") or {}
+        if isinstance(dataset_cfg, dict):
+            for functor_cfg in dataset_cfg.values():
+                if not isinstance(functor_cfg, dict):
+                    continue
+                text = self._instruction_to_text(
+                    (functor_cfg.get("params") or {}).get("instruction")
+                )
+                if text:
+                    return text
+
+        # 兜底:少数配置可能把指令放在顶层或 env 下
         for holder in (cfg.get("env") or {}, cfg):
+            if not isinstance(holder, dict):
+                continue
             for key in ("instruction", "task_description", "prompt"):
-                value = holder.get(key) if isinstance(holder, dict) else None
-                if value:
-                    return str(value)
+                text = self._instruction_to_text(holder.get(key))
+                if text:
+                    return text
 
         raise ValueError(
-            "找不到任务指令。gym_config 里没有 instruction 字段,"
-            "请在 env 配置里显式给 task_description —— pi0.5 的 prompt 不能为空,"
-            "空指令会让策略行为与 SFT 时完全不同。"
+            "找不到任务指令。查过 env.dataset.<functor>.params.instruction 和顶层的 "
+            "instruction/task_description/prompt 都没有。请在 env 配置里显式给 "
+            "task_description —— pi0.5 的 prompt 不能为空,空指令会让策略行为与 SFT 时完全不同。"
         )
 
     # -- 观测 -------------------------------------------------------------
