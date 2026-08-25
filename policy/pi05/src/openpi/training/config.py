@@ -1,6 +1,7 @@
 """See _CONFIGS for the list of available configs."""
 
 import abc
+import os
 from collections.abc import Sequence
 import dataclasses
 import difflib
@@ -930,25 +931,28 @@ _CONFIGS = [
         fsdp_devices=1,
     ),
     TrainConfig(
-        # sim-RECAP 示例配置:在带 advantage 标签的数据池上做 ACP 微调。
-        # 数据池 = 专家数据 + rollout 数据(成败混合),需先经过:
-        #   1) scripts/label_rollout_dataset.py  写 episode_success
-        #   2) launch/run_value_train.sh + run_value_infer.sh  写 indicator 列
-        #   3) scripts/convert_lerobot3.0_to_2.1.py  转成 openpi 可读的 v2.1
-        # 换任务/换轮次时改 repo_id 和 acp_indicator_key 的后缀即可。
+        # sim-RECAP 通用配置:同一配置名服务所有任务/轮次,三个要素由环境变量注入
+        # (launch/recap/07_acp_finetune.sh 与 08_eval.sh 会自动设置):
+        #   SIMRECAP_REPO_ID       数据池,如 RoboSynChallenge/simrecap_sample_loading_round1
+        #   SIMRECAP_INDICATOR_KEY indicator 列,如 complementary_info.acp_indicator_round1;
+        #                          设为 none 则不注入标签(纯 SFT 对照组)
+        #   SIMRECAP_WEIGHTS       初始权重 params 目录(迭代式训练指向上一轮 checkpoint)
+        # norm stats 按 repo_id 分目录(assets/pi05_sim_recap/<repo_id>/),跨轮不串。
         name="pi05_sim_recap",
         model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
         data=LeRobotEmbodiChainDataConfig(
-            repo_id="RoboSynChallenge/simrecap_click_bell_round1",
+            repo_id=os.environ.get("SIMRECAP_REPO_ID", "RoboSynChallenge/simrecap_sample_loading_round1"),
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=True,
-            acp_indicator_key="complementary_info.acp_indicator_round1",
+            acp_indicator_key=(
+                None
+                if os.environ.get("SIMRECAP_INDICATOR_KEY", "").lower() == "none"
+                else os.environ.get("SIMRECAP_INDICATOR_KEY", "complementary_info.acp_indicator_round1")
+            ),
             acp_tag_dropout=0.3,
         ),
-        # 迭代式训练:从上一轮微调好的 checkpoint 继续,而不是从 pi05_base。
-        # 首轮可换回 gs://openpi-assets/checkpoints/pi05_base/params。
         weight_loader=weight_loaders.CheckpointWeightLoader(
-            "./checkpoints/pi05_base_robosynchallenge_full/click_bell/19999/params"
+            os.environ.get("SIMRECAP_WEIGHTS", "gs://openpi-assets/checkpoints/pi05_base/params")
         ),
         num_train_steps=20_000,
         batch_size=64,

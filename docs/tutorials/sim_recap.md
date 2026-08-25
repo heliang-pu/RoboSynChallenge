@@ -1,123 +1,112 @@
-# sim-RECAP:仿真里的优势条件化迭代训练(无需人在回路)
+# sim-RECAP 操作手册(人手版,不依赖 AI)
 
-把 π\*0.6 的 **RECAP** 思想(价值函数 → advantage → 优势条件化策略,实现取自
-[Evo-RL](https://github.com/MINT-SJTU/Evo-RL),已收编在 `third_party/evo_rl/`)
-接入 RoboSynChallenge:真机上需要人打成败标签、人接管纠正,而仿真评估器本身
-就是免费无噪声的标注器,因此整个闭环可以完全无人值守。
+把 π\*0.6 的 **RECAP** 思想(价值函数 → advantage → 优势条件化策略,实现取自 Evo-RL,
+收编在 `third_party/evo_rl/`)接入 RoboSynChallenge:真机上需要人打成败标签、人接管纠正,
+仿真评估器本身就是免费的标注器,所以整个闭环无人值守。每一步都有现成脚本(`launch/recap/`),
+按编号顺序跑即可;机器相关路径集中在 `launch/recap/_common.sh`。
 
 ## 思想
 
-RL 被拆成三个监督学习问题,全程离线、稳定,不改一行模型结构:
+RL 被拆成三个监督学习问题,全程离线、不改模型结构:
 
 1. **成败标签**:rollout 时评估器自动判 success/failure(专家数据天然全 success);
-2. **价值函数**(pistar06):SigLIP+LLM 骨干,分布式 bin 输出,目标 =
-   归一化负剩余步数(失败罚 `c_fail`)——同时编码"能不能成"和"还要多久";
-3. **ACP 优势条件化**:按任务内 top-30% 把 n-step advantage 二值化为 0/1,
-   训练时把字面文本 `Advantage: positive/negative` 拼进 prompt(30% dropout),
-   **部署时永远挂 positive**——失败数据不浪费,成为教会模型"什么是坏"的负样本。
+2. **价值函数**(pistar06,SigLIP + Gemma-3-270m 全量微调):目标 = 归一化负剩余步数(失败罚 `c_fail`),
+   同时编码"能不能成"和"还要多久";
+3. **ACP 优势条件化**:n-step advantage 在任务内按 **top-30%** 二值化(Evo-RL 原实现,不做后处理),
+   训练时把文本 `Advantage: positive/negative` 拼进 prompt(30% dropout),**部署时永远挂 positive**。
+   失败数据不浪费,每一段做对的部分都被回收成正样本。
 
-关键设计:数据池必须同时含**成功与失败的 rollout** + 专家数据。若失败样本只来自
-rollout、成功样本只来自专家,价值函数会学到"辨认动作风格"的捷径而不是任务成败。
+数据池必须同时含**成功与失败的 rollout** + 专家数据,否则价值函数学的是"辨认动作风格"而不是成败。
 
-## 数据版本约定:对外统一 v2.1
-
-专家数据给 v2.1(v3.0 也接受),最终产物是 v2.1。价值函数栈(Evo-RL)只认
-v3.0,所以 v3.0 只作为**内部中间产物**存在于隐藏工作目录
-`lerobot_dataset/.simrecap_work/<task>_<tag>/`,阶段 7 转回 v2.1 发布,
-对外目录里永远只有 v2.1。
-
-## 一轮闭环(一条命令)
+## 一轮流程(以 sample_loading round1 为例)
 
 ```bash
-bash launch/run_sim_recap_round.sh click_bell random \
-     pi05_base_robosynchallenge_full click_bell round1 200 0
+# 0 清场看卡:别误杀别人的 covered_eval / collect_until_valid
+nvidia-smi; bash launch/recap/stop.sh <cmdline子串>            # 需要时用
+
+# 1 rollout(2 分片并行,自动成败标签)→ lerobot_dataset/rollouts/sample_loading_round1(v2.1)
+bash launch/recap/01_rollout.sh sample_loading round1 pi05_sample_loading sample_loading 28000 150
+
+# 1b 人工三视角复核视频,改标签(三处同步)
+bash launch/recap/02_set_label.sh sample_loading round1 91 failure
+
+# 2-4 数据池:专家(清洗版)前 200 集 + rollout 150 集,写 episode_success
+bash launch/recap/03_build_pool.sh sample_loading round1 \
+    /home/phl/FermiBotNas/dataset/RoboSynChallenge/Sim_clean_filtered/cobotmagic_Sim_sample_loading 200
+
+# 5 价值训练(脱离会话;~12h 训满,但通常 3000 步就够)
+bash launch/recap/04_value_train.sh sample_loading round1
+
+# 6a 质检选档(60 集子集,每档 ~10 分钟)→ 选 advantage 信号最强且分离度 ≥0.3 的档
+bash launch/recap/05_value_qc.sh sample_loading round1 002000 003000 004000
+bash launch/recap/stop.sh lerobot_value_train                     # 发布前必须停训
+
+# 6b-7 全量推理写回 + 发布 no_reward / reward 两版 v2.1 到 NAS 与本地(~1.5h)
+setsid nohup bash launch/recap/06_publish.sh sample_loading round1 003000 > /tmp/pub_round1.log 2>&1 < /dev/null & disown
+
+# 8 ACP 微调(对照组加 SIMRECAP_INDICATOR_KEY=none)
+bash launch/recap/07_acp_finetune.sh sample_loading round1 sample_loading_round1 0 \
+    ./checkpoints/pi05_base_robosynchallenge_full/sample_loading/28000/params
+
+# 9 官方 random 协议评估(自动取最新 checkpoint,自动挂 Advantage: positive)
+bash launch/recap/08_eval.sh sample_loading round1 sample_loading_round1 100
 ```
 
-七个阶段自动串联(`START_STAGE=N` 可断点续跑;下文 `work/` 指隐藏工作目录):
+下一轮:`01_rollout.sh sample_loading round2 pi05_sim_recap sample_loading_round1 19999 150`,
+`03_build_pool.sh sample_loading round2 lerobot_dataset/simrecap_sample_loading_round1`(自带边车,失败集标签会被正确恢复),
+`07` 的权重指向 `checkpoints/pi05_sim_recap/sample_loading_round1/19999/params`。
 
-| 阶段 | 做什么 | 产物 |
+## 每步的判定规则
+
+| 步骤 | 看什么 | 合格线 / 处理 |
 |---|---|---|
-| 1 | π_k 无头 rollout N 集,自动记录成败 | `work/rollout_v30/` + `episode_success.json` 边车 |
-| 2 | 专家数据准备:v2.1 复制后上转 v3.0(按源数据指纹缓存,同一份数据只转一次,后续轮秒级软链),v3.0 直接软链 | `work/expert_v30/` |
-| 3 | 专家 + rollout 合并(顺序固定:专家在前) | `work/merged_v30/` |
-| 4 | 写 `episode_success` 列进 meta/episodes(前缀带边车时按边车,否则全 success) | 同上(带标签) |
-| 5 | 训练 pistar06 价值函数 | `outputs/value_train/value_<task>_<tag>/` |
-| 6 | 逐帧 value/advantage/indicator 写回数据集 | `complementary_info.acp_indicator_<tag>` 列 |
-| 7 | 导出标签边车 → 转 v2.1(校验 indicator 存活)→ 发布 | `lerobot_dataset/simrecap_<task>_<tag>/`(v2.1,含边车),并链接进 pi05 训练目录 |
+| 01 rollout | 成功率、`validate_lerobot_dataset` 四门 | `random_rollout` 下 sample_loading ≈7%;全败也可继续(负样本) |
+| 02 复核 | 三视角终态:管子是否留在架孔内直立 | 评估器在稳定计数触发后就结束,可能漏掉后来掉出 |
+| 03 数据池 | 专家:rollout 比例 | round1 用 200:150;专家用 NAS `Sim_clean_filtered`(756 集),不用本地 1000 集原始版 |
+| 04 训练 | wandb loss | 参考:5.3→2.0(500)→1.4(2000)→1.2(3000)→0.72(6000+ 平台) |
+| 05 质检 | 成功−失败首帧 value 差;advantage std;近零占比 | 差 ≥0.3 的档里取 std 最大者。round1:1500 步差 0.11(欠训);**3000 步差 0.43、std 0.030(选)**;6500 步差 0.69 但 std 0.005、96% 帧≈0(记忆化,弃) |
+| 06 发布 | 日志 `ACP stats`、"三列存活确认"、NAS 就绪行 | 专家帧 indicator≈10% 为正是 top-30% 混算的正常结果 |
+| 08 评估 | 同协议对比 ACP vs 纯 SFT(no_reward 或 `SIMRECAP_INDICATOR_KEY=none`) | 提升归因需要这组对照 |
 
-标签的跨轮传递:发布的 v2.1 数据池自带 `episode_success.json` 边车
-(v2.1 的 meta 不保留自定义列)。下一轮把它当 `expert_dataset` 时,
-阶段 4 自动改用这个边车恢复逐集标签——上轮池子里的失败集不会被错标成 success。
+## 数据版本与位置
 
-然后按脚本末尾提示做 ACP 微调(阶段 8):
+对外一律 **v2.1**;v3.0 只存在于隐藏工作目录 `lerobot_dataset/.simrecap_work/<task>_<tag>/`
+(价值栈只认 v3.0)。发布产物:
 
-```bash
-# config.py 的 pi05_sim_recap 中确认 repo_id / acp_indicator_key / weight_loader
-bash policy/pi05/finetune.sh pi05_sim_recap click_bell_round1 0
-```
-
-训完直接评估——推理链路会自动给 prompt 追加 `Advantage: positive`,不需要
-改 deploy 配置。下一轮把 `round_tag` 递增、`weight_loader` 指向新 checkpoint、
-`expert_dataset` 换成本轮合并池,数据池随迭代滚雪球。
-
-## 单独采集 rollout(不跑完整闭环)
-
-只想录一批带成败标签的 rollout 数据时,直接用 eval.sh:
-
-```bash
-cd policy/pi05
-bash eval.sh sample_loading random_rollout pi05_sample_loading sample_loading 0 \
-    --checkpoint_id 28000 --max_episodes 100 --headless True \
-    --rollout_save True --rollout_save_path lerobot_dataset/my_rollout \
-    --eval_video_log False
-```
-
-- 数据集落在 `<save_path>/<robot>_<scene>_<task>_NNN/`(记录器自动建子目录),
-  `episode_success.json` 边车在数据集目录内
-- 交付 v2.1:复制一份后用 `scripts/convert_lerobot3.0_to_2.1.py` 转换,
-  **转换器会丢弃非标准文件,转完记得把边车复制回去**
-
-## 采集设置与评测设置分离
-
-评测必须用官方 `random`;采集可以用任务专属的 `random_<用途>` 设置排除
-无解场景。已有示例:`configs/sample_loading/random_rollout/` 把试管出生范围
-收窄到不会贴住架子(官方范围最坏情况两者直接接触,episode 无解,只产生
-无信息量的失败样本;几何依据见该目录 README)。新任务照此模式复制官方
-random 配置后微调即可,**不要改官方 random 本身**。
-
-## 运维注意
-
-- **中途停止 rollout**:记录器会 spawn image-writer 子进程,只杀主进程会留下
-  孤儿进程拖住 20+GB CUDA 上下文不释放(表现为进程消失但 nvidia-smi 仍记账)。
-  正确做法:`pgrep -af eval_policy` 找全 PID 一起 kill,再确认显存归零。
-- **显存预算**:pi0.5 评估会按 `XLA_PYTHON_CLIENT_MEM_FRACTION=0.4` 预分配约
-  20GB(48G 卡),启动前确认空闲显存足够,否则 JAX 直接 OOM。
-- **一集时长**:sample_loading 失败集跑满 600 步(任务注册的
-  `max_episode_steps=600` 压过配置里的数值),GPU 无争用时约 4-7 分钟/集,
-  估算大批量采集时长要按失败集为主计算。
-
-## 各组件位置
-
-| 组件 | 文件 |
+| 位置 | 内容 |
 |---|---|
-| rollout 采集 + 成败边车 | `scripts/eval_policy.py` 的 `--rollout_save True`(利用 EmbodiChain 的 `save_failed_episodes`,失败集也落盘) |
-| 标签写入(边车/常量/合并前缀三种模式,带硬校验门) | `scripts/label_rollout_dataset.py` |
-| 价值训练 / advantage 写回 | `launch/run_value_train.sh` / `launch/run_value_infer.sh`(包装收编的 Evo-RL CLI) |
-| ACP prompt 注入(训练带 dropout,推理自动 positive) | `policy/pi05/src/openpi/policies/libero_policy.py` 的 `ACPAdvantageTag` + `LeRobotEmbodiChainDataConfig.acp_indicator_key` |
-| 示例训练配置 | `policy/pi05/src/openpi/training/config.py` 的 `pi05_sim_recap` |
-| 价值函数实现(上游收编,勿改) | `third_party/evo_rl/`(来源与删减见其 VENDORED.md) |
+| `lerobot_dataset/rollouts/<task>_<tag>/` | rollout(v2.1 + `episode_success.json`) |
+| NAS `recap_no_reward_dataset/simrecap_<task>_<tag>/` | 合并池,未过价值模型(纯 SFT 对照) |
+| NAS `recap_reward_dataset/simrecap_<task>_<tag>/` + 本地 `lerobot_dataset/simrecap_<task>_<tag>/` | 合并池 + `value/advantage/acp_indicator_<tag>` 三列(ACP 训练用,已链进 `policy/pi05/training_data/RoboSynChallenge/`) |
 
-## 环境
+标签载体:集级成败只认 **`episode_success.json` 边车**(v2.1 的 jsonl 虽带该字段但转换/打标脚本不读);
+两个方向的格式转换器都会丢边车,脚本负责带回;上轮池当专家用而缺边车时 `03` 会拒绝。
+三列 advantage 标签是普通帧级数据列,v2.1 原样携带,训练时由 openpi 的 `ACPAdvantageTag` 现场拼成 prompt 文本。
 
-- 阶段 1/2/3/4/7:仿真环境(conda `robosyn` 或根目录 `.venv`,lerobot 0.4.4 + pyarrow)
-- 阶段 5/6:Evo-RL 环境——`cd third_party/evo_rl && uv venv --python 3.10 && uv pip install -e .`,
-  或复用已有 conda `evo-rl` 环境(脚本会用 `PYTHONPATH` 保证跑的是收编代码)
-- 阶段 8(ACP 微调):pi0.5 的 uv 环境(不变)
+## 环境(三套,脚本已各自选对,列出以便排障)
 
-## 经验参数
+| 用途 | 解释器 |
+|---|---|
+| rollout / 评估 / v2.1 训练读取校验 | `policy/pi05/.venv/bin/python` |
+| 转换、打标、剥元数据、边车 | `~/miniconda3/envs/robosyn/bin/python`(lerobot 0.4.4 + pyarrow,pandas 3) |
+| 合并、价值训练、价值推理 | `~/miniconda3/envs/evo-rl/bin/python` + `PYTHONPATH=third_party/evo_rl/src`(pandas 2) |
 
-- `--acp.n_step 50`:与 pi0.5 的 action_horizon 对齐
-- `--acp.positive_ratio 0.3`:任务内 top-30% 为 positive
-- `acp_tag_dropout 0.3`:让模型同时学会带/不带标签两种条件
-- 低成功率任务(如 sample_loading)首轮多掺专家数据,先用 SFT 把成功率拉到
-  两位数再进循环,否则 positive 样本几乎全来自专家,迭代提升慢
+## 常见故障(全部踩过)
+
+- **杀进程把自己杀了**:`pgrep -f` 会匹配当前 shell;用 `launch/recap/stop.sh`(排除自身),或 `'xx[x]'` 括号技巧。
+- **显存被幽灵占用**:杀 eval/采集主进程后 image-writer 子进程存活;`stop.sh` 会列出仍持卡的 PID,逐个清。
+- **merge 报 HF Hub 404 / 找不到 info.json**:`--root` 传法错误;脚本已用 `HF_LEROBOT_HOME`。`collect_parallel_validated.sh:109` 是错误示范,别照抄。
+- **merge/convert 在 pandas 上崩**:parquet 带 HF 扩展 dtype;脚本会先剥元数据(`_common.sh strip_meta`)。
+- **训练被会话重启杀掉**:脚本用 `setsid nohup` 脱离;自己起长任务也要这样。
+- **wandb 404**:机器 `~/.netrc` 账号与浏览器账号不一致;`wandb login --relogin <key>` 后重启训练。当前登录 `puheliang`。
+- **价值训练目录已存在**:`FileExistsError`;删除或 `--resume=true --config_path=.../checkpoints/last/pretrained_model/value_train_config.json`。
+- **发布被拒绝**:价值训练还在跑(会读 merged_v30)/ 同 tag 重复发布(列已存在)/ merged_v30 没打标——按提示处理。
+- **评估找不到 checkpoint**:20k 步训练只存 `10000/19999`,`08_eval.sh` 自动选最新;手动跑 eval.sh 要加 `--checkpoint_id`。
+- **norm stats 跨轮不重算**:`finetune.sh` 只看配置名目录;`07_acp_finetune.sh` 按 repo_id 路径检查。
+- **试管贴架子无解**:采集用 `configs/<task>/random_rollout/`(几何推导见其 README),评测仍用官方 `random`。
+
+## 参考
+
+- Evo-RL 收编说明:`third_party/evo_rl/VENDORED.md`;打标语义:任务内全帧混算 top-30%,`force_intervention_positive` 在仿真数据上是 no-op。
+- π\*0.6 论文(arXiv 2511.14759):同样的分位规则,迭代阶段比例 ~40%;人工纠正帧强制为正(仿真无此项)。
+- 组件代码:`scripts/eval_policy.py --rollout_save`、`scripts/label_rollout_dataset.py`、`policy/pi05/src/openpi/policies/libero_policy.py` 的 `ACPAdvantageTag`、`policy/pi05/src/openpi/training/config.py` 的 `pi05_sim_recap`(环境变量驱动)。

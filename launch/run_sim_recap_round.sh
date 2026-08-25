@@ -140,6 +140,9 @@ print(hashlib.sha1((p + open(p + '/meta/info.json').read()).encode()).hexdigest(
                 cp -r "$EXPERT_DATASET" "$CACHE_DIR"
                 "$SIM_PYTHON" -m lerobot.datasets.v30.convert_dataset_v21_to_v30 \
                     --repo-id "expert_v30_$FP" --root "$CACHE_ROOT" --push-to-hub false
+                # 上转器只重建 data/meta/videos,非标准文件留在 <name>_old 里:边车要手动带过来
+                [[ -f "$EXPERT_DATASET/episode_success.json" ]] && cp "$EXPERT_DATASET/episode_success.json" "$CACHE_DIR/"
+                rm -rf "${CACHE_DIR}_old"
                 # 转换完整结束才落指纹;中途崩溃的半成品下次自动重建
                 echo "$FP" > "$CACHE_DIR/.fingerprint"
             fi
@@ -202,6 +205,14 @@ if [[ "$START_STAGE" -le 4 ]]; then
     # 前缀数据集若是上一轮的合并池(自带 episode_success.json,内含失败集),
     # 用它的标签;纯专家数据则整体视为 success。
     PREFIX_SIDECAR_ARGS=()
+    if [[ ! -f "$EXPERT_V30_DIR/episode_success.json" ]]; then
+        "$SIM_PYTHON" - "$EXPERT_V30_DIR" <<'PYEOF' || { echo "错误: 前缀数据集含 failure 标签但没有 episode_success.json 边车(上轮发布目录里有,复制到 $EXPERT_V30_DIR)" >&2; exit 1; }
+import sys, glob, pyarrow.parquet as pq
+for f in glob.glob(f"{sys.argv[1]}/meta/episodes/**/*.parquet", recursive=True):
+    t = pq.read_table(f)
+    if "episode_success" in t.column_names and "failure" in t.column("episode_success").to_pylist(): sys.exit(1)
+PYEOF
+    fi
     if [[ -f "$EXPERT_V30_DIR/episode_success.json" ]]; then
         PREFIX_SIDECAR_ARGS=(--prefix-sidecar "$EXPERT_V30_DIR/episode_success.json")
         stage 4 "打标: 前 $EXPERT_EPISODES 集按前缀边车(上轮合并池),其余按 rollout 边车"
@@ -282,7 +293,8 @@ cat <<EOF
   2. 启动训练:
        bash policy/pi05/finetune.sh pi05_sim_recap ${TASK}_${ROUND_TAG} $GPU_ID
   3. 训完评估(推理时自动带 "Advantage: positive" 标签):
-       cd policy/pi05 && bash eval.sh $TASK $SETTING pi05_sim_recap ${TASK}_${ROUND_TAG} $GPU_ID
+       cd policy/pi05 && bash eval.sh $TASK random pi05_sim_recap ${TASK}_${ROUND_TAG} $GPU_ID --checkpoint_id 19999
+     (20k 步训练只存 10000/19999;deploy_policy.yml 默认的 30000 不存在。评测必须用官方 random)
   4. 下一轮: 用新 checkpoint 重跑本脚本,round_tag 递增(如 round2),
      expert_dataset 换成本轮的 $FINAL_DIR(v2.1,含全部标签列)以持续扩大数据池。
 EOF
