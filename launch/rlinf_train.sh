@@ -105,7 +105,10 @@ echo "已链接配置 -> $RLINF_CONFIG_DIR"
 export PYTHONPATH="$ROBOSYN_PATH:$EMBODICHAIN_ROOT:${PYTHONPATH:-}"
 export EMBODICHAIN_PATH="$EMBODICHAIN_ROOT"
 
-# RLinf 用它决定动作维度和归一化口径。CobotMagic 是双臂 14 维,与 ALOHA 同构。
+# run_embodiment.sh 要求给这个位置参数,但对 openpi 路径它其实不起作用:
+# 全仓只有 rlinf/models/embodiment/starvla/utils/action_space.py 读它
+# (RLinf 文档说它决定动作维度和归一化,代码里不成立)。填 ALOHA 是因为
+# CobotMagic 与 ALOHA 同为双臂 14 维,将来换 StarVLA 时这个值才会真正生效。
 export ROBOT_PLATFORM="${ROBOT_PLATFORM:-ALOHA}"
 
 # 离屏渲染
