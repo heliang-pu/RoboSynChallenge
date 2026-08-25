@@ -97,6 +97,7 @@ env:
 
     headless: true
     sim_device: cuda
+    sim_cpu_num: 4        # 引擎默认单核跑物理,是扩展性瓶颈;见 total_num_envs 注释
 
     # 官方 max_episode_steps 取自各任务 random/gym_config.json:
     # mixer_operating 500 / water_pouring 500 / click_bell 361 /
@@ -104,10 +105,14 @@ env:
     max_episode_steps: 500
     max_steps_per_rollout_epoch: 500
 
-    # TODO(实测): 带三路相机渲染时 num_envs 的上限还没测过。RLinf 的 EmbodiChain
-    # 例子是无渲染 CartPole,LIBERO 是轻量渲染 + 200 步 episode,都不可比。
-    # 先跑 launch/rlinf_bench_envs.sh 拿 FPS/显存曲线再定,256 是照抄 robotwin 的占位值。
-    total_num_envs: 256
+    # 实测(4090, sim_cpu_num=4, 随机动作即部分重置最坏情形, 2026-08-25):
+    #   per-instance envs:  1     4     8     16    32    64
+    #   env-steps/s      : 18.5  29.9  25.3  22.0  13.5  崩(Vulkan 纹理耗尽)
+    # 单实例甜点 4-8 env,再往上负收益;16 env 起 PhysX 还会警告
+    # foundLostPairsCapacity 不足可能漏碰撞。所以并行度靠 RLinf 多 env worker 进程,
+    # 每 worker 4-8 env。64 = 8 worker x 8 env,是 8xH100 的保守起点;
+    # 显存不是瓶颈(单实例仅 ~50MB),CPU 核数才是: worker 数 x sim_cpu_num 别超机器核数。
+    total_num_envs: 64
     group_size: ${algorithm.group_size}
     rollout_epoch: 4
 
@@ -135,6 +140,7 @@ env:
     gym_config_path: ${oc.env:ROBOSYN_PATH}/configs/mixer_operating/random/gym_config.json
     headless: true
     sim_device: cuda
+    sim_cpu_num: 4
     max_episode_steps: 500
     max_steps_per_rollout_epoch: 500
     total_num_envs: 64
