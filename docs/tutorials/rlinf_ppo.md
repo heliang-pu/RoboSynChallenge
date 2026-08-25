@@ -314,10 +314,16 @@ x 的符号相反，y/z 也都改了 —— 是有人重新标定过，不是笔
 失败日志保留（`/tmp/rsc_bench_failures/`）；测前 `pgrep -af bench_env_throughput` 查僵尸 ——
 一个挂死的旧进程占着 GPU 能把所有数字压低 2 倍还不留痕迹。
 
-## 还没做完的
+## 端到端冒烟：已通过
 
-- **端到端 PPO 只到冒烟前夜**：`bash launch/rlinf_train.sh smoke`（单卡、2 env、一次更新）
-  配置就绪、dry-run 通过，但还没实跑。
+`bash launch/rlinf_train.sh smoke`（单卡 4090、2 env × 100 步、batch 4、一次更新）完整跑通：
+Ray 编排 → env worker 在 CUDA 建环境 → rollout → advantage → actor 更新 → critic 更新，
+退出码 0。首轮指标形态正常（`rewards=0` 因 100 步跑不到 mixer_operating 的 ~250 步成功点；
+`explained_variance` 大负值因 value head 未训练；`grad_norm` 被 clip）。
+跑到这一步共修了三处接口问题：vendor `EmbodiChainInputs`、`openpi_data.norm_stats_path`、
+启动器激活 venv —— 都已在上文各节说明。
+
+## 还没做完的
 - **其余 9 个任务未做向量化修复**。审计结论（一次 10 agent 并行审计）：全部任务都有
   num_envs>1 问题，PPO 路径上共约 35 处需修；mixer_operating 已修并实测。修法参照
   `ae79cf6` 那次提交的思路：保持 (num_envs, ...) 形状、latch 用 per-env 张量、

@@ -1,0 +1,55 @@
+diff --git a/embodichain/lab/gym/envs/managers/events.py b/embodichain/lab/gym/envs/managers/events.py
+index a531ac40..c7dc61b3 100644
+--- a/embodichain/lab/gym/envs/managers/events.py
++++ b/embodichain/lab/gym/envs/managers/events.py
+@@ -531,11 +531,19 @@ def get_pose(
+             return None
+         entity_cfg.control_parts = control_parts
+         control_part = control_parts[0]
+-        control_part_qpos = entity.get_qpos()[
+-            env_ids, entity.get_joint_ids(control_part)
++        # 这里要的是"取 env_ids 这些行 × control part 的这些关节列",必须分两步索引。
++        # 写成 get_qpos()[env_ids, joint_ids] 是高级索引,两个索引张量会逐元素配对并要求
++        # 形状可广播:num_envs=1 时 [1] 与 [6] 广播成 [6],结果碰巧正确;num_envs=4 时
++        # [4] 与 [6] 无法广播,直接 IndexError。
++        # 另外 compute_fk 的文档要求 qpos 为 (n_envs, num_joints),原写法在 N=1 时给的是
++        # (num_joints,),本就不合契约;分两步索引后是 (len(env_ids), num_joints)。
++        control_part_qpos = entity.get_qpos()[env_ids][
++            :, entity.get_joint_ids(control_part)
+         ]
++        # env_ids 必须透传:部分重置(episode 中途只有部分环境终止)时 env_ids 是子集,
++        # qpos 也只切了这几行;不传的话 compute_fk 按全部环境校验 batch 直接报错。
+         entity_pose = entity.compute_fk(
+-            control_part_qpos, name=control_part, to_matrix=to_matrix
++            control_part_qpos, name=control_part, to_matrix=to_matrix, env_ids=env_ids
+         )  # NOTE: now compute_fk returns arena pose
+         entity_pose_register_name = control_part + "_pose"
+     else:
+diff --git a/embodichain/lab/gym/envs/managers/randomization/spatial.py b/embodichain/lab/gym/envs/managers/randomization/spatial.py
+index d97c52d0..9e6e2ffa 100644
+--- a/embodichain/lab/gym/envs/managers/randomization/spatial.py
++++ b/embodichain/lab/gym/envs/managers/randomization/spatial.py
+@@ -204,8 +204,13 @@ def randomize_robot_eef_pose(
+         if current_qpos.dim() == 1:
+             current_qpos = current_qpos.unsqueeze_(0)
+ 
++        # 必须把 env_ids 透传给 FK/IK:episode 中途只有部分环境终止时,auto-reset 只带
++        # 这一部分环境(env_ids 是子集),qpos 也只切了这几行。不传 env_ids 的话
++        # compute_fk 按全部环境校验 batch,报 "batch size mismatch. Expected N but got k"。
++        # 全量 reset 时 len(env_ids)==num_envs,行为与原来一致——所以这个 bug 只在
++        # 并行 rollout 的部分重置下暴露,单环境评测永远遇不到。
+         current_eef_pose = robot.compute_fk(
+-            name=part, qpos=current_qpos, to_matrix=True
++            name=part, qpos=current_qpos, to_matrix=True, env_ids=env_ids
+         )
+ 
+         new_eef_pose = get_random_pose(
+@@ -218,7 +223,7 @@ def randomize_robot_eef_pose(
+         )
+ 
+         ret, new_qpos = robot.compute_ik(
+-            pose=new_eef_pose, name=part, joint_seed=current_qpos
++            pose=new_eef_pose, name=part, joint_seed=current_qpos, env_ids=env_ids
+         )
+ 
+         new_qpos[ret == False] = current_qpos[ret == False]
