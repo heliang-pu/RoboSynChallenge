@@ -106,6 +106,7 @@ assets 推出 `SIMRECAP_REPO_ID`),`03_build_pool.sh sample_loading round2 lerobo
 - **发布被拒绝**:价值训练还在跑(会读 merged_v30)/ 同 tag 重复发布(列已存在)/ merged_v30 没打标——按提示处理。
 - **评估找不到 checkpoint**:20k 步训练只存 `10000/19999`,`08_eval.sh` 自动选最新;手动跑 eval.sh 要加 `--checkpoint_id`。
 - **norm stats 跨轮不重算**:`finetune.sh` 只看配置名目录;`07_acp_finetune.sh` 按 repo_id 路径检查。
+- **换机器跑价值推理**:checkpoint 的 config.json 写死了训练机的模型绝对路径,先 sed 成本机路径;evo-rl 环境另需 `pip install transformers==4.53.3 scipy`。第二台 4090(`ssh fmc3-1-4090-outer`)已配好:代码 `~/workspace/RoboSynChallenge`(sim-recap 分支)、模型 `~/workspace/models/google/`、NAS 同路径挂载、pi05 venv 可跑仿真评估。
 - **试管贴架子无解**:采集用 `configs/<task>/random_rollout/`(几何推导见其 README),评测仍用官方 `random`。
 
 ## 参考

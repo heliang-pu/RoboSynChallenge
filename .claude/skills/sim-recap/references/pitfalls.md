@@ -62,3 +62,8 @@
 23. **pi05_sim_recap 的策略做 rollout/评估必须带对 `SIMRECAP_REPO_ID`**:norm stats 按 repo_id 存在
     checkpoint 的 assets 里,不一致会 FileNotFoundError;`01_rollout.sh` 从 checkpoint assets 自动推导,
     `08_eval.sh` 按 tag 推导;对照组模型评估要 `SIMRECAP_INDICATOR_KEY=none`。
+24. **价值 checkpoint 把模型绝对路径写死在 config.json 里**(`vision_repo_id`/`language_repo_id` =
+    训练机上的 `/home/<user>/workspace/models/google/...`)。拷到另一台机器推理时先
+    `grep -rl '/home/phl/' <ckpt>/ --include='*.json' | xargs sed -i 's#/home/phl/#/home/<user>/#g'`,
+    否则 transformers 把路径当 HF repo id 报 `HFValidationError`。远端 evo-rl 环境还需手动
+    `pip install transformers==4.53.3 scipy`(Evo-RL 的依赖表没带)。
