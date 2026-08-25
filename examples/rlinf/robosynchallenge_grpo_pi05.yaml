@@ -1,0 +1,44 @@
+# ----------------------------------------------------------------------------
+# RoboSynChallenge + pi0.5 的 GRPO 后训练配置。
+#
+# 继承同目录的 PPO 配置,只覆盖算法相关的字段——env、模型、优化器全部共用,
+# 免得两份配置随时间漂移。
+#
+# GRPO 与 PPO 的实质区别只有四处(对照 RLinf 的
+# libero_spatial_{ppo,grpo}_openpi_pi05.yaml 得到):
+#
+#   group_size    1 -> 8        同一初始状态采 8 条轨迹,组内比较
+#   adv_type      gae -> grpo   用组内 return 归一化当 advantage,不用 GAE
+#   loss_type     actor_critic -> actor   不训 critic
+#   filter_rewards False -> True 丢掉组内奖励全同的样本(advantage 恒 0,白算)
+#
+# 什么时候用 GRPO 而不是 PPO:稀疏 0/1 奖励下 critic 很难学准,组相对优势天然规避
+# 了这个问题;代价是同一初始状态要跑 group_size 倍的 rollout,仿真开销 x8。
+# ----------------------------------------------------------------------------
+defaults:
+  - robosynchallenge_ppo_pi05
+  - _self_
+
+runner:
+  logger:
+    experiment_name: "mixer_operating_grpo_pi05"
+
+algorithm:
+  group_size: 8
+  adv_type: grpo
+  loss_type: actor
+  filter_rewards: True
+
+env:
+  train:
+    # 实际并行环境数 = total_num_envs,其中每 group_size 个共享同一初始状态。
+    # 组数 = total_num_envs / group_size,所以要保证能整除。
+    # TODO(实测): 和 PPO 一样,上限待 launch/rlinf_bench_envs.sh 的结果确定。
+    total_num_envs: 256      # -> 32 组 x 8 条
+  eval:
+    group_size: 1            # 评测不分组,就是普通 rollout
+
+actor:
+  model:
+    # GRPO 不需要 critic,省下 value head 的显存和算力
+    add_value_head: False
