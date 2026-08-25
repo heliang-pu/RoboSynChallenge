@@ -1,0 +1,44 @@
+# ----------------------------------------------------------------------------
+# 单卡探针:在一张 48GB 卡上跑真实(但很慢的)PPO,回答"这个任务上 PPO 涨不涨"。
+#
+#   ROBOSYN_TASK=sample_loading bash launch/rlinf_train.sh probe
+#
+# 任务由环境变量 ROBOSYN_TASK 选,gym_config / norm_stats / 实验名都跟着它走;
+# ROBOSYN_PI05_TORCH_CKPT 要指向该任务转换后的 checkpoint。
+#
+# 规模按单卡实测定:8 env 是单引擎实例的吞吐甜点;优化器状态 ~35GB 必须 offload 到内存
+# (所以内存要 ≥64GB);每个 iteration 约 10-15 分钟。不是正式训练,是探针。
+# ----------------------------------------------------------------------------
+defaults:
+  - robosynchallenge_ppo_pi05
+  - _self_
+
+cluster:
+  component_placement:
+    actor, env, rollout: 0-0
+
+runner:
+  logger:
+    experiment_name: "${oc.env:ROBOSYN_TASK}_probe_ppo_pi05"
+  max_epochs: 200
+  val_check_interval: 20
+  save_interval: 20            # 8.5GB 一个,别存太勤
+
+env:
+  train:
+    gym_config_path: ${oc.env:ROBOSYN_PATH}/configs/${oc.env:ROBOSYN_TASK}/random/gym_config.json
+    total_num_envs: 8          # 单实例甜点
+    rollout_epoch: 2
+    sim_cpu_num: 4
+  eval:
+    gym_config_path: ${oc.env:ROBOSYN_PATH}/configs/${oc.env:ROBOSYN_TASK}/random/gym_config.json
+    total_num_envs: 8
+    sim_cpu_num: 4
+
+actor:
+  micro_batch_size: 1
+  global_batch_size: 160       # 8 env x 10 chunk x 2 epoch
+  enable_offload: True
+  model:
+    openpi_data:
+      norm_stats_path: ${actor.model.model_path}/assets/RoboSynChallenge/cobotmagic_Sim_${oc.env:ROBOSYN_TASK}

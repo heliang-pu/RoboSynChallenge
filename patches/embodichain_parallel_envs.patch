@@ -1,8 +1,26 @@
 diff --git a/embodichain/lab/gym/envs/managers/events.py b/embodichain/lab/gym/envs/managers/events.py
-index a531ac40..c7dc61b3 100644
+index a531ac40..b30680a3 100644
 --- a/embodichain/lab/gym/envs/managers/events.py
 +++ b/embodichain/lab/gym/envs/managers/events.py
-@@ -531,11 +531,19 @@ def get_pose(
+@@ -417,6 +417,17 @@ def register_entity_pose(
+                     }
+                 )
+                 if compute_pose_object_to_arena:
++                    # 额外属性位姿是物体自身坐标系下的固定偏移,每个 arena 相同,配置里只给
++                    # 一份 -> (1,4,4)。entity_pose 是 (len(env_ids),4,4);bmm 要求 batch 一致,
++                    # num_envs=1 时碰巧相等,并行 rollout 下直接报 batch2 尺寸不匹配。
++                    if (
++                        entity_extra_attr_val.ndim == 3
++                        and entity_extra_attr_val.shape[0] == 1
++                        and entity_pose.shape[0] != 1
++                    ):
++                        entity_extra_attr_val = entity_extra_attr_val.expand(
++                            entity_pose.shape[0], -1, -1
++                        )
+                     pose_arena = torch.bmm(entity_pose, entity_extra_attr_val)
+                     update_registration_dict.update(
+                         {
+@@ -531,11 +542,19 @@ def get_pose(
              return None
          entity_cfg.control_parts = control_parts
          control_part = control_parts[0]

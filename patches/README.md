@@ -23,8 +23,15 @@ git apply         /path/to/RoboSynChallenge/patches/embodichain_parallel_envs.pa
    而 FK/IK 按全部环境校验 batch → `Joint positions batch size mismatch`。全量 reset 时
    两者相等测不出来，所以表现为"短测通过、长测必崩"。
 
-验证方式：`bash launch/rlinf_bench_envs.sh mixer_operating 8 --steps 120`
+3. `managers/events.py` `register_entity_pose()`：`torch.bmm(entity_pose, entity_extra_attr_val)`
+   里额外属性位姿是物体坐标系下的固定偏移，配置只给一份 → `(1,4,4)`，而 `entity_pose` 是
+   `(num_envs,4,4)`，`bmm` 报 `batch2` 尺寸不匹配。只有配置里带 `*_pose_object` 额外属性的
+   任务会走到（sample_loading 有，mixer_operating 没有）。修法是 batch 为 1 时 `expand` 到
+   `num_envs`。
+
+验证方式：`bash launch/rlinf_bench_envs.sh <task> 8 --steps 120`
 （随机动作让环境频繁终止，部分重置持续发生），修复后全程无崩溃。
+mixer_operating 和 sample_loading 都按此验证过。
 
 两处都值得整理成最小复现提给 DexForce；`compute_fk` 的文档本身就要求 qpos 为
 `(n_envs, num_joints)`，修复后的形状才是合契约的。
