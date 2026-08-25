@@ -1,31 +1,29 @@
 # ----------------------------------------------------------------------------
-# RoboSynChallenge 的 openpi 输入/输出变换 —— 从 policy/pi05/src/openpi/policies/
-# libero_policy.py 逐字 vendor 过来(EmbodiChainInputs / EmbodiChainOutputs / _parse_image)。
+# 从 policy/pi05/src/openpi/policies/libero_policy.py 逐字 vendor 过来的
+# EmbodiChainInputs / EmbodiChainOutputs / _parse_image。
 #
-# 为什么要复制而不是 import:这三样是 RoboSynChallenge 自己加进 openpi fork 里的,
-# 只存在于 policy/pi05/src/openpi。RLinf 的 venv 装的是 PyPI 上的 rlinf-openpi
-# (RLinf 自己的 openpi 构建,RL 模型代码依赖它),它的 libero_policy 只有
-# LiberoInputs / LiberoOutputs。两个 openpi 塞进一个进程只会重演包遮蔽的噩梦,
-# 所以把 SFT 用的变换原样搬到本仓库。语义逐字一致是硬要求 —— 任何偏差都会让
-# RL 策略看到的输入和 SFT 训练时不同,而且不报错。
+# 为什么要复制而不是 import:这两个类是本仓库 openpi fork 的自定义扩展,只存在于
+# policy/pi05/src/openpi;RLinf venv 装的是 rlinf-openpi(RLinf 自己的 openpi 发行版,
+# RL 采样机制依赖它),里面没有这两个类。跨包 import 会把两个不同版本的 openpi 拽进
+# 同一进程——本会话已经在包遮蔽上摔过一次,不再走那条路。
 #
-# 与上游 fork 的同步:若 policy/pi05 那份改了,这里必须跟着改。
+# 语义契约:这里的代码必须和 SFT 用的版本逐字一致,否则 RL 推理与 SFT 的输入处理
+# 出现分叉,动作分布悄悄漂移。升级 policy/pi05 的 openpi fork 时,请 diff 一下
+# 源文件对应段落并同步这里。来源版本:ppo-post-training 分支合并 84b6c0e 之后。
+#
+# 唯一的改动:import 路径(openpi.transforms / openpi.models.model 是 openpi 的
+# 核心公共 API,rlinf-openpi 同样提供)。
 # ----------------------------------------------------------------------------
-
-from __future__ import annotations
 
 import dataclasses
 
 import einops
 import numpy as np
+
 from openpi import transforms
 from openpi.models import model as _model
 
-__all__ = ["EmbodiChainInputs", "EmbodiChainOutputs", "ROBOT_ACTION_DIM"]
-
-# CobotMagic 双臂:每臂 6 关节 + 1 夹爪。模型内部 action_dim 是 32(padding),
-# 输出时只取前 14 维。与 SFT 侧 EmbodiChainOutputs 的 `[:, :14]` 一致。
-ROBOT_ACTION_DIM = 14
+__all__ = ["EmbodiChainInputs", "EmbodiChainOutputs"]
 
 
 def _parse_image(image) -> np.ndarray:
@@ -39,15 +37,24 @@ def _parse_image(image) -> np.ndarray:
 
 @dataclasses.dataclass(frozen=True)
 class EmbodiChainInputs(transforms.DataTransformFn):
-    """三路相机(主视角 + 左右腕)+ 14 维状态 -> pi0.5 的输入字典。训练与推理共用。"""
+    """
+    This class is used to convert inputs to the model to the expected format. It is used for both training and inference.
 
+    For your own dataset, you can copy this class and modify the keys based on the comments below to pipe
+    the correct elements of your dataset into the model.
+    """
+
+    # Determines which model will be used.
+    # Do not change this for your own dataset.
     model_type: _model.ModelType
 
     def __call__(self, data: dict) -> dict:
+        # Possibly need to parse images to uint8 (H,W,C) since LeRobot automatically
+        # stores as float32 (C,H,W), gets skipped for policy inference.
         base_image = _parse_image(data["observation/image"])
         left_wrist_image = _parse_image(data["observation/left_wrist_image"])
         right_wrist_image = _parse_image(data["observation/right_wrist_image"])
-
+        # Create inputs dict. Do not change the keys in the dict below.
         inputs = {
             "state": data["observation/state"],
             "image": {
@@ -58,19 +65,31 @@ class EmbodiChainInputs(transforms.DataTransformFn):
             "image_mask": {
                 "base_0_rgb": np.True_,
                 "left_wrist_0_rgb": np.True_,
+                # We only mask padding images for pi0 model, not pi0-FAST. Do not change this for your own dataset.
                 "right_wrist_0_rgb": np.True_,
             },
         }
+
+        # Pad actions to the model action dimension. Keep this for your own dataset.
+        # Actions are only available during training.
         if "actions" in data:
             inputs["actions"] = data["actions"]
+
+        # Pass the prompt (aka language instruction) to the model.
         if "prompt" in data:
             inputs["prompt"] = data["prompt"]
+
         return inputs
 
 
 @dataclasses.dataclass(frozen=True)
 class EmbodiChainOutputs(transforms.DataTransformFn):
-    """模型输出(padding 到 32 维)-> 机器人的 14 维动作。仅推理用。"""
+    """
+    This class is used to convert outputs from the model back the the dataset specific format. It is
+    used for inference only.
+    """
 
     def __call__(self, data: dict) -> dict:
-        return {"actions": np.asarray(data["actions"][:, :ROBOT_ACTION_DIM])}
+        # Only return the first N actions -- since we padded actions above to fit the model action
+        # dimension, we need to now parse out the correct number of actions in the return dict.
+        return {"actions": np.asarray(data["actions"][:, :14])}
