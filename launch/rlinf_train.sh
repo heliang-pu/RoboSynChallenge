@@ -130,4 +130,9 @@ if [[ "$DRY_RUN" == "1" ]]; then
 fi
 
 cd "$RLINF_ROOT"
+# run_embodiment.sh 用裸 `python` 起训练,依赖 venv 已激活;不激活会拿到系统 python(没有 ray)
+if [[ -f "$RLINF_ROOT/.venv/bin/activate" ]]; then
+    # shellcheck disable=SC1091
+    source "$RLINF_ROOT/.venv/bin/activate"
+fi
 exec bash examples/embodiment/run_embodiment.sh "$CONFIG_NAME" "$ROBOT_PLATFORM" "${EXTRA_ARGS[@]}"
