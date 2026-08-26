@@ -19,7 +19,7 @@ export SIMRECAP_BATCH_SIZE=64
 export SIMRECAP_NUM_WORKERS=64
 # Pure data parallelism (DDP-like): each HCU owns a full training replica.
 export SIMRECAP_FSDP_DEVICES=1
-export SIMRECAP_NUM_TRAIN_STEPS=20000
+export SIMRECAP_NUM_TRAIN_STEPS=30000
 export SIMRECAP_CHECKPOINT_BASE_DIR=/tmp/pi05/checkpoints
 export SIMRECAP_WEIGHTS=/root/code/models/pi05_base/params
 export HF_LEROBOT_HOME=$PI05/training_data
