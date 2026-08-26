@@ -35,6 +35,39 @@ ModelType: TypeAlias = _model.ModelType
 Filter: TypeAlias = nnx.filterlib.Filter
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be one of 1/0, true/false, yes/no, on/off; got {raw!r}")
+
+
+def _env_float(name: str, default: float, *, minimum: float, maximum: float) -> float:
+    value = float(os.environ.get(name, default))
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{name} must be in [{minimum}, {maximum}], got {value}")
+    return value
+
+
+def _env_positive_int(name: str, default: int) -> int:
+    value = int(os.environ.get(name, default))
+    if value <= 0:
+        raise ValueError(f"{name} must be positive, got {value}")
+    return value
+
+
+def _simrecap_indicator_key() -> str | None:
+    if not _env_flag("SIMRECAP_ACP_ENABLE", True):
+        return None
+    key = os.environ.get("SIMRECAP_INDICATOR_KEY", "complementary_info.acp_indicator_round1")
+    return None if key.strip().lower() == "none" else key
+
+
 @dataclasses.dataclass(frozen=True)
 class AssetsConfig:
     """Determines the location of assets (e.g., norm stats) that will be used to set up the data pipeline.
@@ -931,11 +964,14 @@ _CONFIGS = [
         fsdp_devices=1,
     ),
     TrainConfig(
-        # sim-RECAP 通用配置:同一配置名服务所有任务/轮次,三个要素由环境变量注入
+        # sim-RECAP 通用配置:同一配置名服务所有任务/轮次,由环境变量注入
         # (launch/recap/07_acp_finetune.sh 与 08_eval.sh 会自动设置):
         #   SIMRECAP_REPO_ID       数据池,如 RoboSynChallenge/simrecap_sample_loading_round1
         #   SIMRECAP_INDICATOR_KEY indicator 列,如 complementary_info.acp_indicator_round1;
         #                          设为 none 则不注入标签(纯 SFT 对照组)
+        #   SIMRECAP_ACP_ENABLE    总开关,1/0;关闭时忽略 indicator key
+        #   SIMRECAP_ACP_DROPOUT   标签 dropout,默认 0.3
+        #   SIMRECAP_SAVE_INTERVAL checkpoint 保存间隔,默认 2500
         #   SIMRECAP_WEIGHTS       初始权重 params 目录(迭代式训练指向上一轮 checkpoint)
         # norm stats 按 repo_id 分目录(assets/pi05_sim_recap/<repo_id>/),跨轮不串。
         name="pi05_sim_recap",
@@ -944,12 +980,10 @@ _CONFIGS = [
             repo_id=os.environ.get("SIMRECAP_REPO_ID", "RoboSynChallenge/simrecap_sample_loading_round1"),
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=True,
-            acp_indicator_key=(
-                None
-                if os.environ.get("SIMRECAP_INDICATOR_KEY", "").lower() == "none"
-                else os.environ.get("SIMRECAP_INDICATOR_KEY", "complementary_info.acp_indicator_round1")
+            acp_indicator_key=_simrecap_indicator_key(),
+            acp_tag_dropout=_env_float(
+                "SIMRECAP_ACP_DROPOUT", 0.3, minimum=0.0, maximum=1.0
             ),
-            acp_tag_dropout=0.3,
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader(
             os.environ.get("SIMRECAP_WEIGHTS", "gs://openpi-assets/checkpoints/pi05_base/params")
@@ -957,6 +991,8 @@ _CONFIGS = [
         num_train_steps=20_000,
         batch_size=64,
         fsdp_devices=1,
+        save_interval=_env_positive_int("SIMRECAP_SAVE_INTERVAL", 2500),
+        keep_period=_env_positive_int("SIMRECAP_SAVE_INTERVAL", 2500),
     ),
     TrainConfig(
         name="pi05_sample_loading",
