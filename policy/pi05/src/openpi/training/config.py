@@ -994,6 +994,10 @@ _CONFIGS = [
         num_train_steps=_env_positive_int("SIMRECAP_NUM_TRAIN_STEPS", 20_000),
         batch_size=_env_positive_int("SIMRECAP_BATCH_SIZE", 64),
         fsdp_devices=_env_positive_int("SIMRECAP_FSDP_DEVICES", 1),
+        # Match the proven full-finetuning setup used by
+        # pi05_base_robosynchallenge_full. Keeping a second full EMA copy makes
+        # pure data parallelism exceed 64GB per device.
+        ema_decay=None,
         checkpoint_base_dir=os.environ.get("SIMRECAP_CHECKPOINT_BASE_DIR", "./checkpoints"),
         save_interval=_env_positive_int("SIMRECAP_SAVE_INTERVAL", 2500),
         keep_period=_env_positive_int("SIMRECAP_SAVE_INTERVAL", 2500),
