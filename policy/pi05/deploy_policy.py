@@ -139,7 +139,7 @@ def get_model(usr_args):
 
 
 def _infer(model, obs, guidance):
-    """Encode `obs` and sample one chunk. Returns (env actions, model-space actions)."""
+    """Encode `obs` and sample one chunk of absolute environment actions."""
     img_arr, state = encode_obs(obs)
     model.update_observation_window(img_arr, state)
     return model.get_action(guidance)
@@ -186,23 +186,23 @@ def eval(env, model, obs):
                 model.pending_launch = (launch_step, guidance is not None, start_inference(model.pytorch_device))
             else:
                 started_at = start_inference(model.pytorch_device)
-                actions, raw = _infer(model, final_obs, guidance)
+                actions = _infer(model, final_obs, guidance)
                 finish_inference(started_at, inference_times_s, model.pytorch_device)
                 if guidance is not None:
                     sched.guided_launches += 1
                 # The first chunk of an episode has nothing to overlap with, so
                 # it lands immediately no matter what the delay model says.
-                sched.stage(actions, raw, launch_step, land_step=launch_step if first_chunk else None)
+                sched.stage(actions, launch_step, land_step=launch_step if first_chunk else None)
                 if first_chunk:
                     sched.adopt()
 
         if getattr(model, "pending_future", None) is not None and model.pending_future.done():
-            actions, raw = model.pending_future.result()
+            actions = model.pending_future.result()
             launch_step, was_guided, started_at = model.pending_launch
             finish_inference(started_at, inference_times_s, model.pytorch_device)
             if was_guided:
                 sched.guided_launches += 1
-            sched.stage(actions, raw, launch_step, land_step=sched.step_index)
+            sched.stage(actions, launch_step, land_step=sched.step_index)
             model.pending_future = None
 
         if sched.should_adopt():

@@ -81,8 +81,7 @@ class ChunkScheduler:
 
     def reset(self) -> None:
         self.step_index = 0          # env steps executed this episode
-        self.chunk = None            # active chunk, env-space actions (T, A)
-        self.chunk_raw = None        # active chunk, model-space (T, A') for RTC
+        self.chunk = None            # active chunk, absolute env-space actions (T, A)
         self.chunk_t0 = None         # env step that chunk[0] corresponds to
         self.pending = None          # chunk computed but not yet landed
         self.launches = 0
@@ -112,11 +111,17 @@ class ChunkScheduler:
     def guidance(self, launch_step: int) -> dict | None:
         """RTC target for a chunk launched at ``launch_step``.
 
+        The target is returned in *absolute environment* action space, not the
+        model's. The model predicts deltas against the state of the inference
+        that produced them, so a chunk planned earlier is only meaningful once
+        it has been rebased onto the current state -- the caller does that
+        conversion, which is why absolute actions are what gets stored here.
+
         Returns ``None`` when guidance is off or there is no overlap left to
         guide with (the first chunk of an episode, or ``H == action_horizon``
         with a synchronous sampler, where the old chunk is fully consumed).
         """
-        if not self.rtc_enabled or self.chunk_raw is None:
+        if not self.rtc_enabled or self.chunk is None:
             return None
 
         offset = launch_step - self.chunk_t0
@@ -126,8 +131,8 @@ class ChunkScheduler:
 
         # Resample the old chunk onto the new chunk's timeline: new index i is
         # env step launch_step + i, which is old index offset + i.
-        aligned = np.zeros_like(self.chunk_raw)
-        aligned[:overlap] = self.chunk_raw[offset : offset + overlap]
+        aligned = np.zeros_like(self.chunk)
+        aligned[:overlap] = self.chunk[offset : offset + overlap]
 
         # Never let the soft region run past the actions we actually have; past
         # `overlap` the target is zero padding, which is not a real constraint.
@@ -136,12 +141,12 @@ class ChunkScheduler:
         weights = _rtc.get_prefix_weights(start, end, self.action_horizon, self.prefix_attention_schedule)
         if not weights.any():
             return None
-        return {"prev_chunk": aligned, "prefix_weights": weights, "overlap": overlap}
+        return {"prev_actions_env": aligned, "prefix_weights": weights, "overlap": overlap}
 
     # ---------------------------------------------------------------- chunks
 
     def stage(
-        self, actions: np.ndarray, raw_actions: np.ndarray, launch_step: int, land_step: int | None = None
+        self, actions: np.ndarray, launch_step: int, land_step: int | None = None
     ) -> None:
         """Record a freshly sampled chunk.
 
@@ -152,7 +157,6 @@ class ChunkScheduler:
         """
         self.pending = {
             "actions": np.asarray(actions),
-            "raw": np.asarray(raw_actions),
             "t0": int(launch_step),
             "land_step": int(launch_step) + self.inference_delay if land_step is None else int(land_step),
         }
@@ -161,7 +165,6 @@ class ChunkScheduler:
     def adopt(self) -> None:
         assert self.pending is not None, "adopt() with nothing pending"
         self.chunk = self.pending["actions"]
-        self.chunk_raw = self.pending["raw"]
         self.chunk_t0 = self.pending["t0"]
         self.pending = None
 

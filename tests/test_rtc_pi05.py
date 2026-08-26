@@ -33,10 +33,10 @@ def run_episode(sched, steps):
                 # The guidance target must agree with the old plan step-for-step.
                 overlap = guide["overlap"]
                 expected = np.arange(launch, launch + overlap, dtype=np.float32)
-                np.testing.assert_allclose(guide["prev_chunk"][:overlap, 0], expected)
-                np.testing.assert_allclose(guide["prev_chunk"][overlap:], 0.0)
+                np.testing.assert_allclose(guide["prev_actions_env"][:overlap, 0], expected)
+                np.testing.assert_allclose(guide["prev_actions_env"][overlap:], 0.0)
             chunk = stamped_chunk(launch)
-            sched.stage(chunk, chunk, launch)
+            sched.stage(chunk, launch)
             if sched.chunk is None:  # first chunk of the episode lands immediately
                 sched.adopt()
         if sched.should_adopt():
@@ -87,7 +87,7 @@ def test_guidance_absent_without_overlap():
         action_horizon=AH, execution_horizon=AH, inference_delay=0, rtc_enabled=True
     )
     chunk = stamped_chunk(0)
-    sched.stage(chunk, chunk, 0)
+    sched.stage(chunk, 0)
     sched.adopt()
     assert sched.guidance(AH) is None  # old chunk exactly exhausted
 
@@ -100,7 +100,7 @@ def test_guidance_overlap_shrinks_with_horizon():
             action_horizon=AH, execution_horizon=horizon, inference_delay=5, rtc_enabled=True
         )
         chunk = stamped_chunk(0)
-        sched.stage(chunk, chunk, 0)
+        sched.stage(chunk, 0)
         sched.adopt()
         guide = sched.guidance(sched.execution_horizon)
         overlaps[horizon] = guide["overlap"]
@@ -134,7 +134,7 @@ def test_real_mode_lands_when_inference_actually_finishes():
         action_horizon=AH, execution_horizon=10, inference_delay=3, rtc_enabled=True
     )
     first = stamped_chunk(0)
-    sched.stage(first, first, 0, land_step=0)
+    sched.stage(first, 0, land_step=0)
     sched.adopt()
 
     # Inference launched at step 10 but the worker took 7 steps, not the 3 we
@@ -148,7 +148,7 @@ def test_real_mode_lands_when_inference_actually_finishes():
         emitted = sched.action()[0]
         assert emitted == sched.step_index, "old chunk must cover the overrun"
         sched.advance()
-    sched.stage(late, late, 10, land_step=sched.step_index)
+    sched.stage(late, 10, land_step=sched.step_index)
     assert sched.should_adopt()
     sched.adopt()
     assert sched.action()[0] == sched.step_index
@@ -158,7 +158,7 @@ def test_holds_last_action_rather_than_crashing_when_a_chunk_runs_dry():
     """A pathologically late chunk must degrade, not raise, mid-episode."""
     sched = ChunkScheduler(action_horizon=AH, execution_horizon=10, inference_delay=3)
     chunk = stamped_chunk(0)
-    sched.stage(chunk, chunk, 0, land_step=0)
+    sched.stage(chunk, 0, land_step=0)
     sched.adopt()
     for _ in range(AH + 5):
         sched.action()
