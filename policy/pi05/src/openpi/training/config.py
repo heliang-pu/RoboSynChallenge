@@ -972,6 +972,9 @@ _CONFIGS = [
         #   SIMRECAP_ACP_ENABLE    总开关,1/0;关闭时忽略 indicator key
         #   SIMRECAP_ACP_DROPOUT   标签 dropout,默认 0.3
         #   SIMRECAP_SAVE_INTERVAL checkpoint 保存间隔,默认 2500
+        #   SIMRECAP_BATCH_SIZE / SIMRECAP_FSDP_DEVICES / SIMRECAP_NUM_TRAIN_STEPS
+        #                          训练资源与步数,默认 64/1/20000
+        #   SIMRECAP_CHECKPOINT_BASE_DIR checkpoint 根目录,默认 ./checkpoints
         #   SIMRECAP_WEIGHTS       初始权重 params 目录(迭代式训练指向上一轮 checkpoint)
         # norm stats 按 repo_id 分目录(assets/pi05_sim_recap/<repo_id>/),跨轮不串。
         name="pi05_sim_recap",
@@ -988,9 +991,10 @@ _CONFIGS = [
         weight_loader=weight_loaders.CheckpointWeightLoader(
             os.environ.get("SIMRECAP_WEIGHTS", "gs://openpi-assets/checkpoints/pi05_base/params")
         ),
-        num_train_steps=20_000,
-        batch_size=64,
-        fsdp_devices=1,
+        num_train_steps=_env_positive_int("SIMRECAP_NUM_TRAIN_STEPS", 20_000),
+        batch_size=_env_positive_int("SIMRECAP_BATCH_SIZE", 64),
+        fsdp_devices=_env_positive_int("SIMRECAP_FSDP_DEVICES", 1),
+        checkpoint_base_dir=os.environ.get("SIMRECAP_CHECKPOINT_BASE_DIR", "./checkpoints"),
         save_interval=_env_positive_int("SIMRECAP_SAVE_INTERVAL", 2500),
         keep_period=_env_positive_int("SIMRECAP_SAVE_INTERVAL", 2500),
     ),
