@@ -17,6 +17,8 @@ parent_directory = os.path.dirname(current_file_path)
 sys.path.insert(0, parent_directory)
 
 from pi_model import PI0
+from policy.inference_timing import finish_inference, start_inference
+
 
 
 def _any_true(value):
@@ -116,34 +118,36 @@ def eval(env, model, obs):
         instruction = getattr(env, "_current_instruction", None)
         model.set_language(instruction)
 
-    # Encode and update observation window
+    inference_times_s = []
+    started_at = start_inference(model.pytorch_device)
     img_arr, state = encode_obs(obs)
     model.update_observation_window(img_arr, state)
-
-    # Get multi-step actions from π0.5
     actions = model.get_action()[: model.pi0_step]
+    action_tensors = [_format_env_action(action, env) for action in actions]
+    finish_inference(started_at, inference_times_s, model.pytorch_device)
 
     # Execute actions one by one in the environment
     final_obs = obs
-    for action in actions:
-        action_tensor = _format_env_action(action, env)
+    info = None
+    truncated = False
+    for action_tensor in action_tensors:
         final_obs, reward, terminated, truncated, info = env.step(action_tensor)
         # The `gym_config` setting configures the `actionmanager` to support delta action input;
         # the default action must be absolute `qpos`.
 
         # Check success after every environment step.  Item assembly can satisfy
         # its 3 mm contact criterion only briefly inside an action chunk; waiting
-        # until all ``pi0_step`` actions have executed can miss that state.  The
-        # official main-branch pi0.5 adapter uses the same per-step check.
+        # until all ``pi0_step`` actions have executed can miss that state.
         if _any_true(env.get_wrapper_attr("is_task_success")()):
             break
         if _any_true(terminated) or _any_true(truncated):
             break
+
         # Update observation window after each step
         img_arr, state = encode_obs(final_obs)
         model.update_observation_window(img_arr, state)
 
-    return final_obs, info, truncated
+    return final_obs, info, truncated, inference_times_s
 
 
 def reset_model(model):
