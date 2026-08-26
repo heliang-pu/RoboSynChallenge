@@ -900,7 +900,12 @@ _CONFIGS = [
         name="pi05_base_robosynchallenge_full",
         model=pi0_config.Pi0Config(pi05=True,action_horizon=50),
         data=LeRobotEmbodiChainDataConfig(
-            repo_id="RoboSynChallenge/cobotmagic_Sim_click_bell",
+            # The norm stats live under assets/<repo_id>, and each task's
+            # checkpoint carries its own. Override this to evaluate a task other
+            # than click_bell instead of shuffling assets directories around.
+            repo_id=os.environ.get(
+                "ROBOSYN_REPO_ID", "RoboSynChallenge/cobotmagic_Sim_click_bell"
+            ),
             # Replace with your repo-id
             base_config=DataConfig(prompt_from_task=True),
             # EmbodiChain datasets are usually absolute-action targets.

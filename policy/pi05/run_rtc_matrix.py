@@ -4,14 +4,12 @@
 Each cell is one `eval.sh` invocation differing only in how chunks are executed,
 so every configuration sees the same episode seeds and the comparison is paired.
 
-    python policy/pi05/run_rtc_matrix.py \
-        --task sample_loading --setting random \
-        --train-config pi05_base_robosynchallenge_full --model-name sample_loading \
-        --checkpoint-id 28000 --episodes 20 --delay 3
+    python policy/pi05/run_rtc_matrix.py --tasks all --episodes 20 --delay 3
 """
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -20,6 +18,22 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 METRICS_RE = re.compile(r"Metrics file:\s*(\S+)")
+
+# Checkpoint per task, matching the ones report/official_random100.csv scored,
+# ordered so the tasks that can actually show a difference run first: a policy
+# that never succeeds cannot reveal whether RTC helps.
+TASKS = [
+    ("mixer_operating", 28000),
+    ("water_pouring", 28000),
+    ("items_handover", 28000),
+    ("table_rearrangement", 30000),
+    ("click_bell", 19999),
+    ("manipulate_pipette", 28000),
+    ("item_assembly", 28000),
+    ("sample_loading", 28000),
+    ("handle_basket", 28000),
+    ("drawer_open_place", 28000),
+]
 
 
 def build_matrix(horizons, delay, extra_delay, probe_correction):
@@ -50,9 +64,9 @@ def build_matrix(horizons, delay, extra_delay, probe_correction):
     return cells
 
 
-def run_cell(cell, args, log_dir):
+def run_cell(cell, task, checkpoint_id, args, log_dir):
     overrides = [
-        "--checkpoint_id", str(args.checkpoint_id),
+        "--checkpoint_id", str(checkpoint_id),
         "--max_episodes", str(args.episodes),
         "--seed", str(args.seed),
         "--headless", "True",
@@ -65,18 +79,22 @@ def run_cell(cell, args, log_dir):
         "--prefix_attention_schedule", args.schedule,
     ]
     cmd = ["bash", str(REPO_ROOT / "policy" / "pi05" / "eval.sh"),
-           args.task, args.setting, args.train_config, args.model_name, str(args.gpu), *overrides]
+           task, args.setting, args.train_config, task, str(args.gpu), *overrides]
 
-    log_path = log_dir / f"{cell['name']}.log"
+    # Each task's checkpoint ships norm stats under its own repo id.
+    env = dict(os.environ, ROBOSYN_REPO_ID=f"RoboSynChallenge/cobotmagic_Sim_{task}")
+
+    log_path = log_dir / f"{task}__{cell['name']}.log"
     started = time.time()
-    print(f"\n=== {cell['name']} ===\n{' '.join(cmd)}\n  -> {log_path}", flush=True)
+    print(f"\n=== {task} / {cell['name']} ===\n  -> {log_path}", flush=True)
     with log_path.open("w") as log:
-        proc = subprocess.run(cmd, cwd=REPO_ROOT, stdout=log, stderr=subprocess.STDOUT)
+        proc = subprocess.run(cmd, cwd=REPO_ROOT, stdout=log, stderr=subprocess.STDOUT, env=env)
     elapsed = time.time() - started
 
     text = log_path.read_text(errors="replace")
     match = METRICS_RE.search(text)
-    result = {"cell": cell, "returncode": proc.returncode, "wall_seconds": round(elapsed, 1),
+    result = {"task": task, "checkpoint_id": checkpoint_id, "cell": cell,
+              "returncode": proc.returncode, "wall_seconds": round(elapsed, 1),
               "log": str(log_path), "metrics_path": match.group(1) if match else None}
     if proc.returncode != 0:
         print(f"  FAILED (rc={proc.returncode}); see {log_path}", flush=True)
@@ -95,8 +113,8 @@ def run_cell(cell, args, log_dir):
 
 
 def tabulate(results):
-    rows = ["| cell | H | mode | d | RTC | success | avg steps | infer ms | wall min |",
-            "|---|---|---|---|---|---|---|---|---|"]
+    rows = ["| task | cell | H | mode | d | RTC | success | avg steps | infer ms | wall min |",
+            "|---|---|---|---|---|---|---|---|---|---|"]
     for r in results:
         c = r["cell"]
         m = (r.get("metrics") or {}).get("summary", r.get("metrics") or {})
@@ -104,7 +122,7 @@ def tabulate(results):
         steps = m.get("average_action_steps")
         infer = m.get("average_inference_time_seconds")
         rows.append(
-            f"| {c['name']} | {c['pi0_step']} | {c['async_mode']} | {c['inference_delay']} | "
+            f"| {r['task']} | {c['name']} | {c['pi0_step']} | {c['async_mode']} | {c['inference_delay']} | "
             f"{'yes/' + c.get('rtc_correction','identity') if c['rtc'] else 'no'} | {sr} | "
             f"{steps if steps is None else round(steps,1)} | "
             f"{'' if infer is None else round(infer*1000)} | {r['wall_seconds']/60:.1f} |"
@@ -114,11 +132,10 @@ def tabulate(results):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--task", required=True)
+    p.add_argument("--tasks", nargs="+", default=["all"],
+                   help="task names, or 'all' for the built-in table")
     p.add_argument("--setting", default="random")
-    p.add_argument("--train-config", required=True)
-    p.add_argument("--model-name", required=True)
-    p.add_argument("--checkpoint-id", type=int, required=True)
+    p.add_argument("--train-config", default="pi05_base_robosynchallenge_full")
     p.add_argument("--episodes", type=int, default=20)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--gpu", type=int, default=0)
@@ -130,7 +147,7 @@ def main():
     p.add_argument("--probe-correction", action="store_true",
                    help="add one vjp-correction cell at the smallest horizon")
     p.add_argument("--schedule", default="exp")
-    p.add_argument("--video", default="False")
+    p.add_argument("--video", default="True")
     p.add_argument("--out", default="report/rtc_matrix")
     args = p.parse_args()
 
@@ -138,15 +155,20 @@ def main():
     log_dir = out_dir / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
 
+    tasks = TASKS if args.tasks == ["all"] else [(t, dict(TASKS)[t]) for t in args.tasks]
     cells = build_matrix(args.horizons, args.delay, args.extra_delay, args.probe_correction)
-    print(f"{len(cells)} cells x {args.episodes} episodes -> {out_dir}", flush=True)
+    total = len(tasks) * len(cells)
+    print(f"{len(tasks)} tasks x {len(cells)} cells = {total} runs x {args.episodes} episodes "
+          f"-> {out_dir}", flush=True)
 
     results = []
-    for cell in cells:
-        results.append(run_cell(cell, args, log_dir))
-        (out_dir / "results.json").write_text(
-            json.dumps({"args": vars(args), "results": results}, indent=2, ensure_ascii=False))
-        (out_dir / "table.md").write_text(tabulate(results) + "\n")
+    for task, checkpoint_id in tasks:
+        for cell in cells:
+            results.append(run_cell(cell, task, checkpoint_id, args, log_dir))
+            print(f"  [{len(results)}/{total}] complete", flush=True)
+            (out_dir / "results.json").write_text(
+                json.dumps({"args": vars(args), "results": results}, indent=2, ensure_ascii=False))
+            (out_dir / "table.md").write_text(tabulate(results) + "\n")
 
     print("\n" + tabulate(results))
     print(f"\nwrote {out_dir}/results.json and table.md")
