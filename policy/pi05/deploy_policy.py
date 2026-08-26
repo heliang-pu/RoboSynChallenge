@@ -75,6 +75,7 @@ def get_model(usr_args):
     checkpoint_id = int(usr_args.get("checkpoint_id", 30000))
     pi0_step = int(usr_args.get("pi0_step", 50))
     pytorch_device = usr_args.get("pytorch_device", "cuda")
+    inference_backend = usr_args.get("inference_backend", "jax")
 
     if train_config_name is None or model_name is None:
         raise ValueError(
@@ -87,6 +88,12 @@ def get_model(usr_args):
         checkpoint_id=checkpoint_id,
         pi0_step=pi0_step,
         pytorch_device=pytorch_device,
+        inference_backend=inference_backend,
+        checkpoint_root=usr_args.get("checkpoint_root"),
+        converted_checkpoint=usr_args.get("converted_checkpoint"),
+        realtime_vla_dir=usr_args.get("realtime_vla_dir"),
+        tokenizer_path=usr_args.get("tokenizer_path"),
+        prompt_for_allocation=usr_args.get("prompt_for_allocation", "click the bell"),
     )
     return model
 def eval(env, model, obs):
