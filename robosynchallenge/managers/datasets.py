@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
@@ -34,20 +36,71 @@ from embodichain.lab.gym.utils.misc import is_stereocam
 from embodichain.lab.sim.sensors import Camera, ContactSensor
 from embodichain.lab.gym.envs.managers.manager_base import Functor
 from embodichain.lab.gym.envs.managers.cfg import DatasetFunctorCfg
-from embodichain.lab.gym.envs.managers.datasets import (
-    LeRobotRecorder as EmbodiChainLeRobotRecorder,
-)
 from robosynchallenge.data.constants import ROBOSYNCHALLENGE_ROOT
 
 if TYPE_CHECKING:
     from embodichain.lab.gym.envs import EmbodiedEnv
 
-try:
-    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+def _load_recorder_lerobot_dataset():
+    """Load the modern LeRobot dataset API without replacing openpi's legacy API.
 
-    LEROBOT_AVAILABLE = True
-except ImportError:
-    LEROBOT_AVAILABLE = False
+    The pi0.5 environment intentionally pins an older LeRobot tree under the
+    ``lerobot.common`` namespace, while EmbodiChain's recorder uses the newer
+    ``lerobot.datasets`` namespace.  When ``LEROBOT_RECORDER_PACKAGE_ROOT`` is
+    set, extend the installed package namespace with that modern LeRobot tree
+    and make its sibling dependencies available as a last-resort import path
+    (plus any dirs listed in ``LEROBOT_RECORDER_EXTRA_SITE_PACKAGES``).
+    """
+    try:
+        from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+        return LeRobotDataset
+    except ImportError:
+        package_root = os.environ.get("LEROBOT_RECORDER_PACKAGE_ROOT")
+        if not package_root:
+            return None
+
+    package_root = Path(package_root).expanduser().resolve()
+    if package_root.name != "lerobot":
+        package_root = package_root / "lerobot"
+    if not (package_root / "datasets" / "lerobot_dataset.py").is_file():
+        return None
+
+    import lerobot
+
+    package_path = str(package_root)
+    if package_path not in lerobot.__path__:
+        lerobot.__path__.append(package_path)
+    site_packages = str(package_root.parent)
+    if site_packages not in sys.path:
+        sys.path.append(site_packages)
+    # Editable installs (e.g. third_party/evo_rl/src/lerobot) keep their
+    # dependencies elsewhere; let the launcher hand us those site-packages
+    # dirs as a last-resort import path too.
+    for extra in os.environ.get("LEROBOT_RECORDER_EXTRA_SITE_PACKAGES", "").split(os.pathsep):
+        if extra and Path(extra).is_dir() and extra not in sys.path:
+            sys.path.append(extra)
+
+    try:
+        from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+        return LeRobotDataset
+    except ImportError:
+        return None
+
+
+LeRobotDataset = _load_recorder_lerobot_dataset()
+LEROBOT_AVAILABLE = LeRobotDataset is not None
+
+# EmbodiChain may have imported its dataset module before this compatibility
+# bridge ran.  Refresh its module globals before subclassing the recorder.
+import embodichain.lab.gym.envs.managers.datasets as _embodichain_datasets
+
+if LEROBOT_AVAILABLE:
+    _embodichain_datasets.LeRobotDataset = LeRobotDataset
+    _embodichain_datasets.LEROBOT_AVAILABLE = True
+
+EmbodiChainLeRobotRecorder = _embodichain_datasets.LeRobotRecorder
 
 __all__ = ["LeRobotRecorder", "install_lerobot_recorder_override"]
 

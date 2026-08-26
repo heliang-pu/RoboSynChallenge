@@ -54,9 +54,20 @@ fi
 # Point the recorder compatibility bridge at the existing robosyn environment
 # without replacing the version imported by openpi.
 if [[ -z "${LEROBOT_RECORDER_PACKAGE_ROOT:-}" ]]; then
-    for candidate in "$HOME"/miniconda3/envs/robosyn/lib/python*/site-packages/lerobot; do
+    for candidate in "$HOME"/miniconda3/envs/{robosyn,evo-rl}/lib/python*/site-packages/lerobot; do   # 没有 robosyn 的机器用 evo-rl(同为 lerobot 0.4.x)
         if [[ -f "$candidate/datasets/lerobot_dataset.py" ]]; then
             export LEROBOT_RECORDER_PACKAGE_ROOT="$candidate"
+            break
+        fi
+    done
+fi
+if [[ -z "${LEROBOT_RECORDER_PACKAGE_ROOT:-}" ]]; then   # editable 安装(不在 site-packages)时让解释器自己报位置
+    for py in "$HOME"/miniconda3/envs/{robosyn,evo-rl}/bin/python; do
+        candidate=$("$py" -c 'import lerobot,os;print(os.path.dirname(lerobot.__file__))' 2>/dev/null) || continue
+        if [[ -f "$candidate/datasets/lerobot_dataset.py" ]]; then
+            export LEROBOT_RECORDER_PACKAGE_ROOT="$candidate"
+            # editable 树的依赖(accelerate 等)在该环境的 site-packages 里,一并作为兜底路径
+            export LEROBOT_RECORDER_EXTRA_SITE_PACKAGES="$("$py" -c 'import site;print(site.getsitepackages()[0])' 2>/dev/null)"
             break
         fi
     done

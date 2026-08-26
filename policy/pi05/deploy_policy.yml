@@ -22,4 +22,4 @@ eval_video_obs_key: cam_high
 # ------------------------------------------------------------------
 train_config_name: null
 checkpoint_id: 30000
-pi0_step: 50 # It only represents the number of execution steps. not the horizon of reasoning, it's the horizon of execution.
+pi0_step: 10 # Official pi0.5 default; item_assembly scored 0/19 with 50-step open-loop execution.

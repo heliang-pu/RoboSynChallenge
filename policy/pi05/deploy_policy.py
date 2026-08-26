@@ -18,6 +18,16 @@ sys.path.insert(0, parent_directory)
 
 from pi_model import PI0
 
+
+def _any_true(value):
+    """Convert scalar/array/tensor done flags to a Python bool."""
+    if isinstance(value, torch.Tensor):
+        return bool(value.any().item())
+    if isinstance(value, np.ndarray):
+        return bool(value.any())
+    return bool(value)
+
+
 def _format_env_action(action, env):
     """Convert pi0 output into the torch action format EmbodiChain accepts."""
     action_array = np.asarray(action, dtype=np.float32).reshape(-1)
@@ -32,6 +42,7 @@ def _format_env_action(action, env):
         action_array, dtype=torch.float32, device=env.unwrapped.device
     )
     return action_tensor.unsqueeze(0)
+
 
 def encode_obs(obs):
     """Convert gym Gymnasium Dict observation to π₀ input format.
@@ -68,12 +79,12 @@ def get_model(usr_args):
         train_config_name  — openpi training config name
         model_name         — model name (e.g. "pi0_base")
         checkpoint_id      — checkpoint step number
-        pi0_step           — number of action steps to execute per inference (default 50)
+        pi0_step           — number of action steps to execute per inference (default 10)
     """
     train_config_name = usr_args.get("train_config_name")
     model_name = usr_args.get("model_name")
     checkpoint_id = int(usr_args.get("checkpoint_id", 30000))
-    pi0_step = int(usr_args.get("pi0_step", 50))
+    pi0_step = int(usr_args.get("pi0_step", 10))
     pytorch_device = usr_args.get("pytorch_device", "cuda")
 
     if train_config_name is None or model_name is None:
@@ -89,6 +100,8 @@ def get_model(usr_args):
         pytorch_device=pytorch_device,
     )
     return model
+
+
 def eval(env, model, obs):
     """Run one inference cycle and execute actions in the environment.
 
@@ -117,14 +130,22 @@ def eval(env, model, obs):
         final_obs, reward, terminated, truncated, info = env.step(action_tensor)
         # The `gym_config` setting configures the `actionmanager` to support delta action input;
         # the default action must be absolute `qpos`.
-        _trunc = truncated.any() if hasattr(truncated, "any") else truncated
-        if bool(_trunc):
+
+        # Check success after every environment step.  Item assembly can satisfy
+        # its 3 mm contact criterion only briefly inside an action chunk; waiting
+        # until all ``pi0_step`` actions have executed can miss that state.  The
+        # official main-branch pi0.5 adapter uses the same per-step check.
+        if _any_true(env.get_wrapper_attr("is_task_success")()):
+            break
+        if _any_true(terminated) or _any_true(truncated):
             break
         # Update observation window after each step
         img_arr, state = encode_obs(final_obs)
         model.update_observation_window(img_arr, state)
 
     return final_obs, info, truncated
+
+
 def reset_model(model):
     """Reset π₀ internal state (observation window and instruction)."""
     model.reset_obsrvationwindows()

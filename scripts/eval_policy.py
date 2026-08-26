@@ -200,6 +200,47 @@ def get_saved_episode_count(env):
     return max(episode_counts) if episode_counts else None
 
 
+def summarize_task_metrics(info):
+    """Flatten ``info['metrics']`` (env 0) into plain Python scalars/lists.
+
+    ``compute_task_state`` returns per-env tensors; for post-mortem debugging of
+    a failed episode we only care about the single env this script drives.
+    """
+    if not isinstance(info, dict):
+        return None
+    metrics = info.get("metrics")
+    if not metrics:
+        return None
+
+    summary = {}
+    for key, value in metrics.items():
+        try:
+            if isinstance(value, torch.Tensor):
+                value = value[0] if value.ndim > 0 else value
+                summary[key] = value.tolist()
+            elif isinstance(value, (bool, int, float)):
+                summary[key] = value
+            elif isinstance(value, np.ndarray):
+                summary[key] = np.asarray(value).reshape(-1).tolist()
+        except Exception:  # noqa: BLE001 - diagnostics must never break eval
+            continue
+    return summary or None
+
+
+def format_task_metrics(summary):
+    parts = []
+    for key, value in summary.items():
+        if isinstance(value, list):
+            parts.append(f"{key}=[" + ", ".join(f"{v:.4f}" for v in value) + "]")
+        elif isinstance(value, bool):
+            parts.append(f"{key}={value}")
+        elif isinstance(value, float):
+            parts.append(f"{key}={value:.4f}")
+        else:
+            parts.append(f"{key}={value}")
+    return "  ".join(parts)
+
+
 def write_rollout_success_sidecar(dataset_dir, config, episode_records, saved_count):
     """Persist per-episode success labels next to the rollout dataset.
 
@@ -721,6 +762,10 @@ def main():
             print(f"  [{episode+1:3d}/{max_episodes}] {status}  "
                   f"(success rate: {success_count}/{episode+1} = {100*success_count/(episode+1):.1f}%)")
 
+            episode_metrics = summarize_task_metrics(locals().get("info"))
+            if episode_metrics:
+                print(f"  metrics: {format_task_metrics(episode_metrics)}")
+
             if rollout_dir is not None:
                 episode_records.append(
                     {
@@ -728,6 +773,7 @@ def main():
                         "seed": ep_seed,
                         "success": bool(episode_success),
                         "env_steps": int(env_steps),
+                        "metrics": episode_metrics,
                     }
                 )
         loop_completed = True

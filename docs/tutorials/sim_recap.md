@@ -108,6 +108,8 @@ assets 推出 `SIMRECAP_REPO_ID`),`03_build_pool.sh sample_loading round2 lerobo
 - **评估找不到 checkpoint**:20k 步训练只存 `10000/19999`,`08_eval.sh` 自动选最新;手动跑 eval.sh 要加 `--checkpoint_id`。
 - **norm stats 跨轮不重算**:`finetune.sh` 只看配置名目录;`07_acp_finetune.sh` 按 repo_id 路径检查。
 - **换机器跑价值推理**:checkpoint 的 config.json 写死了训练机的模型绝对路径,先 sed 成本机路径;evo-rl 环境另需 `pip install transformers==4.53.3 scipy`。第二台 4090(`ssh fmc3-1-4090-outer`)已配好:代码 `~/workspace/RoboSynChallenge`(sim-recap 分支)、模型 `~/workspace/models/google/`、NAS 同路径挂载、pi05 venv 可跑仿真评估。
+- **同一策略再采一批(如 held-out 检验价值函数)要换 seed**:`SEED_BASE=30011 bash launch/recap/01_rollout.sh …`,否则场景与上一批完全相同;专家 held-out 用 `03_build_pool.sh … 200:260` 取训练池之外的区间。
+- **别的机器上 rollout 录制报 LeRobot 未安装**:`pip install --no-deps --target ~/lerobot044 lerobot==0.4.4`,再设 `LEROBOT_RECORDER_PACKAGE_ROOT=~/lerobot044/lerobot`、`LEROBOT_RECORDER_EXTRA_SITE_PACKAGES=<evo-rl env site-packages>`、`PY_SIM=<evo-rl python>`;不能用 `third_party/evo_rl/src/lerobot`(老 fork,缺 `metadata_buffer_size`)。
 - **试管贴架子无解**:采集用 `configs/<task>/random_rollout/`(几何推导见其 README),评测仍用官方 `random`。
 
 ## 参考

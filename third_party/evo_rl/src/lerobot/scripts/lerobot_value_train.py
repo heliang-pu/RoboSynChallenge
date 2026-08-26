@@ -156,13 +156,11 @@ def value_train(
         processor_kwargs["preprocessor_overrides"]["rename_observations_processor"] = {
             "rename_map": cfg.rename_map
         }
-        postprocessor_kwargs["postprocessor_overrides"] = {
-            "unnormalizer_processor": {
-                "stats": dataset.meta.stats,
-                "features": cfg.value.output_features or {},
-                "norm_map": cfg.value.normalization_mapping,
-            },
-        }
+        # Value checkpoints do not have an action unnormalizer in their
+        # postprocessor pipeline (only a device processor).  Passing an
+        # unnormalizer override while resuming therefore fails validation.
+        # The postprocessor is not used by the value-training forward pass, so
+        # load the checkpoint's saved postprocessor unchanged.
 
     preprocessor, postprocessor = make_pre_post_processors(
         policy_cfg=cfg.value,

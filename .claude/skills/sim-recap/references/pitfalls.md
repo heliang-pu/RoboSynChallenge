@@ -72,3 +72,28 @@
     的 task 退化成 `0`。因 `prompt_from_task=True`,训练 prompt 变成 "0" 而评估用真实指令 →
     训练/评估不一致。strip_meta 现在跳过 `tasks.parquet`。已交付数据集可直接重写 tasks.jsonl
     (单任务时指令已知)。合并前剥分片元数据也会经此丢失,同样已修。
+26. **同一策略再采一批必须换 seed**:`01_rollout.sh` 分片 seed 固定为 `SEED_BASE*(片号+1)`(默认 10001/20002),
+    不换 `SEED_BASE` 就会复现上一批完全相同的场景(随机化由 seed 决定),采出来的不是新数据、更不是 held-out。
+    held-out 用 `SEED_BASE=30011 bash launch/recap/01_rollout.sh …`。
+27. **没有 robosyn env 的机器上 rollout 录制报 "LeRobot is not installed"**:sim 端录制走
+    `robosynchallenge/managers/datasets.py` 的桥接,从 `LEROBOT_RECORDER_PACKAGE_ROOT` 借一份 lerobot 0.4.x 的
+    `datasets` API。两个坑:① Evo-RL 收编的 `third_party/evo_rl/src/lerobot` 是老 fork,`LeRobotDataset.create()`
+    没有 `metadata_buffer_size`,不能用它;② editable 树的依赖(accelerate 等)不在其父目录。做法:
+    `pip install --no-deps --target ~/lerobot044 lerobot==0.4.4`,然后
+    `LEROBOT_RECORDER_PACKAGE_ROOT=~/lerobot044/lerobot LEROBOT_RECORDER_EXTRA_SITE_PACKAGES=<evo-rl env 的 site-packages>`
+    (桥接会把后者作为兜底 import 路径;`eval.sh` 找不到 robosyn 时会自动试 evo-rl,但 evo-rl 里是 fork 版,仍要手动指到 pip 版)。
+    `PY_SIM` 在这类机器上指 evo-rl 的 python(有 lerobot 0.4.4 + pyarrow)。
+28. **`pgrep -f` 的括号技巧只防 pgrep 自己,不防外层 shell**:`ssh host 'pids=$(pgrep -f "xx[x]"); kill $pids; … xxx …'`
+    里远端 `bash -c` 的命令串含有 `xxx` 字面量,照样匹配到自己、把整段命令杀掉(后面的重启根本没执行)。
+    远端清理用 `launch/recap/stop.sh <子串>`(排除自身与祖先),或把模式拆到变量里拼。
+29. **advantage 只是价值残差的漂移,记忆化后标签会反向**:Evo-RL 稠密奖励 = 解析目标 V* 的差分,
+    A(t) = e(t+50) − e(t)(e = V_pred − V*)。价值函数在要打标的同一份小池子上训练会把目标背下来
+    (round1:专家残差 std 0.0014,rollout 0.02–0.06),混算 top-30% 的阈值只有 +0.0012(1.5 步的价值量),
+    于是 positive 选中的是**残差方差大的来源**(失败 rollout 帧 38.8% 为正、专家 18.9%),positive 集 67% 来自
+    失败 rollout。deploy 时挂 positive 等于"模仿基模自己的失败"。对策:专家帧强制正、阈值只在 rollout 上算、
+    价值函数交叉打标(A 训 B 标)、用 held-out 分离度而不是 in-sample 分离度选档。
+30. **末尾 n_step 帧无自举 → 失败集最后 2 秒 100% 为 positive**:`lerobot_value_infer.py` 在 t+n_step 出界时
+    bootstrap=0,A = V*(t) − V(t);V 在失败末尾偏悲观(−0.577 vs 目标 −0.5),所以每个超时失败的最后 50 帧
+    全是 positive(round1 占 positive 的 14.4%,全是静止的超时姿态)。打标后屏蔽最后 n_step 帧,或改成用 V* 自举。
+31. **ACP 微调重算 norm stats 会给热启动的基模换尺子**:350 集池(含 52% 失败 rollout 帧)的 state 统计量与
+    基模差到 0.77 std、std ×1.6(右臂维),前几千步先要重新适应。ACP 阶段直接复用基模 assets 里的 norm_stats。
