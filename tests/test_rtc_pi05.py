@@ -126,3 +126,41 @@ def test_guidance_weight_saturates_at_endpoints():
     assert float(rtc.guidance_weight(1.0, 10.0)) == 10.0
     assert float(rtc.guidance_weight(0.0, 10.0)) == 10.0
     assert float(rtc.guidance_weight(0.5, 10.0)) == pytest.approx(2.0)
+
+
+def test_real_mode_lands_when_inference_actually_finishes():
+    """`async_mode="real"` overrides the land step with the observed one."""
+    sched = ChunkScheduler(
+        action_horizon=AH, execution_horizon=10, inference_delay=3, rtc_enabled=True
+    )
+    first = stamped_chunk(0)
+    sched.stage(first, first, 0, land_step=0)
+    sched.adopt()
+
+    # Inference launched at step 10 but the worker took 7 steps, not the 3 we
+    # budgeted -- it lands late, and the old chunk has to cover the gap.
+    for _ in range(10):
+        sched.action()
+        sched.advance()
+    assert sched.should_launch()
+    late = stamped_chunk(10)
+    for _ in range(7):
+        emitted = sched.action()[0]
+        assert emitted == sched.step_index, "old chunk must cover the overrun"
+        sched.advance()
+    sched.stage(late, late, 10, land_step=sched.step_index)
+    assert sched.should_adopt()
+    sched.adopt()
+    assert sched.action()[0] == sched.step_index
+
+
+def test_holds_last_action_rather_than_crashing_when_a_chunk_runs_dry():
+    """A pathologically late chunk must degrade, not raise, mid-episode."""
+    sched = ChunkScheduler(action_horizon=AH, execution_horizon=10, inference_delay=3)
+    chunk = stamped_chunk(0)
+    sched.stage(chunk, chunk, 0, land_step=0)
+    sched.adopt()
+    for _ in range(AH + 5):
+        sched.action()
+        sched.advance()
+    assert sched.action()[0] == AH - 1, "should clamp to the last planned action"
