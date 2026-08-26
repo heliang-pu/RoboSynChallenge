@@ -23,3 +23,18 @@ eval_video_obs_key: cam_high
 train_config_name: null
 checkpoint_id: 30000
 pi0_step: 10 # Official pi0.5 default; item_assembly scored 0/19 with 50-step open-loop execution.
+
+# ------------------------------------------------------------------
+# Asynchronous execution + Real-Time Chunking (arXiv:2506.07339)
+# ------------------------------------------------------------------
+async_mode: "off"    # off = env frozen during inference (original behaviour)
+                     # sim = env keeps stepping on the old chunk for a fixed
+                     #       inference_delay, computed inline so runs reproduce
+                     # real = inference on a worker thread, wall-clock delay
+inference_delay: 0   # d, in env steps. Ignored when async_mode is off.
+                     # Note H + d must fit in action_horizon (50) or H is clamped.
+rtc: false                     # guide each new chunk to agree with the one it replaces
+prefix_attention_schedule: exp # zeros | ones | linear | exp
+max_guidance_weight: 10.0
+rtc_correction: vjp  # vjp = differentiate through the denoiser (per the paper)
+                     # identity = cheap approximation used by the LeRobot port

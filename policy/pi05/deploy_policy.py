@@ -16,8 +16,11 @@ current_file_path = os.path.abspath(__file__)
 parent_directory = os.path.dirname(current_file_path)
 sys.path.insert(0, parent_directory)
 
+from concurrent.futures import ThreadPoolExecutor
+
 from pi_model import PI0
 from policy.inference_timing import finish_inference, start_inference
+from rtc_runtime import ASYNC_MODES, ChunkScheduler
 
 
 
@@ -89,6 +92,14 @@ def get_model(usr_args):
     pi0_step = int(usr_args.get("pi0_step", 10))
     pytorch_device = usr_args.get("pytorch_device", "cuda")
 
+    async_mode = str(usr_args.get("async_mode", "off")).lower()
+    if async_mode not in ASYNC_MODES:
+        raise ValueError(f"async_mode must be one of {ASYNC_MODES}, got {async_mode!r}")
+    inference_delay = int(usr_args.get("inference_delay", 0))
+    if async_mode == "off":
+        inference_delay = 0
+    rtc_enabled = bool(usr_args.get("rtc", False))
+
     if train_config_name is None or model_name is None:
         raise ValueError(
             "train_config_name and model_name must be provided in usr_args"
@@ -100,56 +111,126 @@ def get_model(usr_args):
         checkpoint_id=checkpoint_id,
         pi0_step=pi0_step,
         pytorch_device=pytorch_device,
+        max_guidance_weight=float(usr_args.get("max_guidance_weight", 10.0)),
+        rtc_correction=str(usr_args.get("rtc_correction", "vjp")),
     )
+
+    model.async_mode = async_mode
+    model.scheduler = ChunkScheduler(
+        action_horizon=model.action_horizon,
+        execution_horizon=pi0_step,
+        inference_delay=inference_delay,
+        rtc_enabled=rtc_enabled,
+        prefix_attention_schedule=str(usr_args.get("prefix_attention_schedule", "exp")),
+    )
+    model.executor = ThreadPoolExecutor(max_workers=1) if async_mode == "real" else None
+
+    setup = model.scheduler.describe()
+    setup["async_mode"] = async_mode
+    setup["rtc_correction"] = model.rtc_correction
+    print(f"[pi05] chunk runtime: {setup}")
+    if model.scheduler.clamped_from is not None:
+        print(
+            f"[pi05] WARNING: execution_horizon {model.scheduler.clamped_from} + "
+            f"inference_delay {inference_delay} exceeds action_horizon "
+            f"{model.action_horizon}; clamped to {model.scheduler.execution_horizon}."
+        )
     return model
 
 
-def eval(env, model, obs):
-    """Run one inference cycle and execute actions in the environment.
+def _infer(model, obs, guidance):
+    """Encode `obs` and sample one chunk. Returns (env actions, model-space actions)."""
+    img_arr, state = encode_obs(obs)
+    model.update_observation_window(img_arr, state)
+    return model.get_action(guidance)
 
-    This function:
-    1. Sets the language instruction (on first call when observation_window is None)
-    2. Encodes observation and updates the model's observation window
-    3. Calls model.get_action() to get multi-step actions
-    4. Steps through each action in the environment
+
+def eval(env, model, obs):
+    """Advance the environment by one execution horizon.
+
+    Three runtimes share this path, selected by `model.async_mode`:
+
+    * ``off``  -- synchronous. The env is frozen while the model runs, which is
+      the original behaviour: sample a chunk, execute `pi0_step` of it, repeat.
+    * ``sim``  -- the env keeps stepping on the *old* chunk for a fixed
+      `inference_delay` steps before the new one takes over. Inference is still
+      computed inline, so the delay is exact and the run is reproducible.
+    * ``real`` -- inference runs on a background thread and the new chunk lands
+      whenever it actually finishes. Realistic, but wall-clock dependent.
+
+    With RTC enabled the sampler is additionally guided so each new chunk agrees
+    with the plan it is replacing over the already-committed prefix.
     """
-    # Set language instruction if first call
     if model.observation_window is None:
         instruction = getattr(env, "_current_instruction", None)
         model.set_language(instruction)
 
+    sched = model.scheduler
     inference_times_s = []
-    started_at = start_inference(model.pytorch_device)
-    img_arr, state = encode_obs(obs)
-    model.update_observation_window(img_arr, state)
-    actions = model.get_action()[: model.pi0_step]
-    action_tensors = [_format_env_action(action, env) for action in actions]
-    finish_inference(started_at, inference_times_s, model.pytorch_device)
+    final_obs, info, truncated = obs, None, False
+    steps_taken = 0
 
-    # Execute actions one by one in the environment
-    final_obs = obs
-    info = None
-    truncated = False
-    for action_tensor in action_tensors:
+    while steps_taken < sched.execution_horizon:
+        # `sched.pending` only fills once a chunk exists, so in `real` mode the
+        # in-flight future is what keeps us from launching the same replan twice.
+        in_flight = getattr(model, "pending_future", None) is not None
+        if sched.should_launch() and not in_flight:
+            launch_step = sched.step_index
+            guidance = sched.guidance(launch_step)
+            first_chunk = sched.chunk is None
+
+            if model.async_mode == "real" and not first_chunk:
+                # Hand inference to the worker and keep stepping the old chunk;
+                # the future is drained below once it resolves.
+                model.pending_future = model.executor.submit(_infer, model, final_obs, guidance)
+                model.pending_launch = (launch_step, guidance is not None, start_inference(model.pytorch_device))
+            else:
+                started_at = start_inference(model.pytorch_device)
+                actions, raw = _infer(model, final_obs, guidance)
+                finish_inference(started_at, inference_times_s, model.pytorch_device)
+                if guidance is not None:
+                    sched.guided_launches += 1
+                # The first chunk of an episode has nothing to overlap with, so
+                # it lands immediately no matter what the delay model says.
+                sched.stage(actions, raw, launch_step, land_step=launch_step if first_chunk else None)
+                if first_chunk:
+                    sched.adopt()
+
+        if getattr(model, "pending_future", None) is not None and model.pending_future.done():
+            actions, raw = model.pending_future.result()
+            launch_step, was_guided, started_at = model.pending_launch
+            finish_inference(started_at, inference_times_s, model.pytorch_device)
+            if was_guided:
+                sched.guided_launches += 1
+            sched.stage(actions, raw, launch_step, land_step=sched.step_index)
+            model.pending_future = None
+
+        if sched.should_adopt():
+            sched.adopt()
+
+        action_tensor = _format_env_action(sched.action(), env)
         final_obs, reward, terminated, truncated, info = env.step(action_tensor)
-        # The `gym_config` setting configures the `actionmanager` to support delta action input;
-        # the default action must be absolute `qpos`.
+        # The `gym_config` setting configures the `actionmanager` to support delta
+        # action input; the default action must be absolute `qpos`.
+        sched.advance()
+        steps_taken += 1
 
         # Check success after every environment step.  Item assembly can satisfy
         # its 3 mm contact criterion only briefly inside an action chunk; waiting
-        # until all ``pi0_step`` actions have executed can miss that state.
+        # until the whole horizon has executed can miss that state.
         if _any_true(env.get_wrapper_attr("is_task_success")()):
             break
         if _any_true(terminated) or _any_true(truncated):
             break
 
-        # Update observation window after each step
-        img_arr, state = encode_obs(final_obs)
-        model.update_observation_window(img_arr, state)
-
     return final_obs, info, truncated, inference_times_s
 
 
 def reset_model(model):
-    """Reset π₀ internal state (observation window and instruction)."""
+    """Reset π₀ internal state (observation window, instruction, chunk timeline)."""
+    pending = getattr(model, "pending_future", None)
+    if pending is not None:
+        pending.cancel()
+        model.pending_future = None
+    model.scheduler.reset()
     model.reset_obsrvationwindows()
