@@ -21,6 +21,45 @@ from scipy.stats import binomtest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VIDEO_RE = re.compile(r"episode_(\d+)_seed_(-?\d+)_(success|fail)\.mp4$")
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+# "  Episode 7: SUCCESS; action_steps=312/500; inference=0.061430s over 32 calls"
+EPISODE_RE = re.compile(
+    r"Episode (\d+): (SUCCESS|FAIL); action_steps=(\d+)/(\d+); "
+    r"inference=([\d.]+)s over (\d+) calls"
+)
+
+
+def parse_log(log_path):
+    """Recover per-episode results from a cell log.
+
+    `evaluation_metrics.json` is not reliable here: EmbodiChain's `env.close()`
+    tears the process down before the summary is written, so the run ends with
+    exit status 0 and no metrics file even though every episode completed. The
+    per-episode lines and the recorded videos survive, and together they carry
+    everything the summary would have.
+    """
+    path = Path(log_path)
+    if not path.exists():
+        return None
+    text = ANSI_RE.sub("", path.read_text(errors="replace"))
+    episodes = [
+        {"index": int(i), "success": status == "SUCCESS", "steps": int(steps),
+         "max_steps": int(cap), "infer_s": float(infer), "calls": int(calls)}
+        for i, status, steps, cap, infer, calls in EPISODE_RE.findall(text)
+    ]
+    if not episodes:
+        return None
+    return {
+        "episode_count": len(episodes),
+        "success_count": sum(e["success"] for e in episodes),
+        "success_rate": sum(e["success"] for e in episodes) / len(episodes),
+        "average_action_steps": sum(e["steps"] for e in episodes) / len(episodes),
+        # The first call of a run pays XLA compilation; it would swamp the mean.
+        "average_inference_time_seconds": (
+            sorted(e["infer_s"] for e in episodes)[len(episodes) // 2]
+        ),
+        "episodes": episodes,
+    }
 
 
 def episode_outcomes(metrics_path):
@@ -52,11 +91,21 @@ def load(run_dir):
     data = json.loads((run_dir / "results.json").read_text())
     cells = {}
     for r in data["results"]:
-        summary = (r.get("metrics") or {}).get("summary", {})
+        summary = (r.get("metrics") or {}).get("summary") or parse_log(r["log"]) or {}
+        outcomes = episode_outcomes(r.get("metrics_path"))
+        if not outcomes and summary.get("episodes"):
+            # No videos (or a different run dir): fall back to episode order,
+            # which is still paired because every cell replays the same seeds.
+            outcomes = {e["index"]: e["success"] for e in summary["episodes"]}
+        elif outcomes and len(outcomes) > summary.get("episode_count", 0):
+            # The teardown crash swallows the last episode's log line but its
+            # video is already on disk, so the videos are the complete record.
+            summary = dict(summary)
+            summary["episode_count"] = len(outcomes)
+            summary["success_count"] = sum(outcomes.values())
+            summary["success_rate"] = sum(outcomes.values()) / len(outcomes)
         cells[(r["task"], r["cell"]["name"])] = {
-            "result": r,
-            "summary": summary,
-            "outcomes": episode_outcomes(r.get("metrics_path")),
+            "result": r, "summary": summary, "outcomes": outcomes,
         }
     return data, cells
 
@@ -125,7 +174,7 @@ def main():
         p2 = binomtest(a2, a2 + b2, 0.5).pvalue if a2 + b2 else 1.0
         lines.append(f"| {h} | {a1} | {b1} | {p1:.3f} | {a2} | {b2} | {p2:.3f} |")
 
-    lines += ["", "## Inference latency", "", "| task | H | cell | mean infer ms |", "|---|---|---|---|"]
+    lines += ["", "## Inference latency", "", "| task | H | cell | median infer ms |", "|---|---|---|---|"]
     for task in tasks:
         for h in horizons:
             for k in ("sync", "async", "rtc"):
