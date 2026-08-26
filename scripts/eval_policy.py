@@ -622,9 +622,16 @@ def main():
                 )
 
                 while env_steps < max_env_steps:
-                    obs, info, truncated, new_times = policy_pkg.eval(
-                        eval_env, model, obs
-                    )
+                    # Upstream's timing change made eval return a 4-tuple,
+                    # but adapters that predate it (including upstream's own
+                    # smolvla) still return (obs, info, truncated).  Accept
+                    # both so an untimed adapter degrades instead of crashing.
+                    eval_result = policy_pkg.eval(eval_env, model, obs)
+                    if len(eval_result) == 4:
+                        obs, info, truncated, new_times = eval_result
+                    else:
+                        obs, info, truncated = eval_result
+                        new_times = []
                     inference_times.extend(new_times)
                     env_steps = int(info["elapsed_steps"].item())
 
