@@ -137,6 +137,8 @@ class RoboSynChallengeVLAEnv(EmbodiChainEnv):
         self.wrist_cameras = [str(x) for x in wrist]
         self.image_size = int(_cfg_get(cfg, "image_size", 224))
         self.state_key = str(_cfg_get(cfg, "state_key", "qpos"))
+        # CobotMagic 双臂 14 维。设 0 关闭检查。见 _wrap_obs 里的错误说明。
+        self.expected_state_dim = int(_cfg_get(cfg, "expected_state_dim", 14))
         self.success_reward = float(_cfg_get(cfg, "success_reward", 1.0))
         self.terminate_on_success = bool(_cfg_get(cfg, "terminate_on_success", True))
         self._configured_description = _cfg_get(cfg, "task_description", None)
@@ -338,7 +340,24 @@ class RoboSynChallengeVLAEnv(EmbodiChainEnv):
         states = robot_obs[self.state_key]
         if not isinstance(states, torch.Tensor):
             states = torch.as_tensor(states)
+        import os
+
+        if os.environ.get("RSC_DEBUG_TRANSFORM") and not getattr(self, "_debug_printed", False):
+            self._debug_printed = True
+            print(
+                f"[RSC_DEBUG_ENV] num_envs={self.num_envs} engine_num_envs={getattr(self.env.unwrapped, 'num_envs', '?')} "
+                f"raw_{self.state_key}={tuple(states.shape)} main={tuple(main_images.shape)}",
+                flush=True,
+            )
         states = states.to(self.device, dtype=torch.float32).reshape(self.num_envs, -1)
+        expected = self.expected_state_dim
+        if expected and states.shape[-1] != expected:
+            raise RuntimeError(
+                f"state 维度 {states.shape[-1]} != 期望的 {expected}。最常见的原因:同一个进程里建了"
+                "两个 EmbodiChain 环境(RLinf 的 env worker 在开启评测时会把 train/eval 环境建在"
+                "一起),dexsim 引擎是进程级单例,第二个实例会让第一个实例的机器人关节读数翻倍。"
+                "把 runner.val_check_interval 设为 -1,评测另起进程做。"
+            )
 
         return {
             "main_images": main_images,

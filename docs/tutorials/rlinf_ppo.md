@@ -248,6 +248,18 @@ episode 中途只有部分环境终止、auto-reset 只带子集时报
 退出码可能还是 0）。所以失败日志必须保留 —— `launch/rlinf_bench_envs.sh` 会把失败档位的
 完整日志存到 `/tmp/rsc_bench_failures/`，别删。
 
+## Known issue：训练进程内不能开评测（`val_check_interval` 必须是 -1）
+
+RLinf 的 env worker 在**同一个进程**里同时构造 train 和 eval 两个环境实例，而 dexsim 引擎是
+进程级单例：第二个实例建好后，第一个实例的机器人 `get_qpos()` 从 (N,14) 变成 (N,28)
+（关节被重复注册），rollout 在 openpi 的 Normalize 处报 `shapes (28,) (14,)`。冒烟没撞到是因为
+它关了评测；探针第一版开了 `val_check_interval: 20` 就必崩。
+
+两份配置现在都是 `val_check_interval: -1`；接入层在 `_wrap_obs` 里加了 state 维度校验
+（`expected_state_dim`，默认 14），撞上时直接报出这个原因而不是让下游的广播错误糊过去。
+评测用保存的 checkpoint 另起进程做。8×H100 上如果想开在线评测，得先确认 RLinf 能把 eval env
+放到独立的 worker 进程里。
+
 ## Known issue：上游新版 eval 在本机确定性崩溃（不影响 PPO）
 
 上游 `d3161d4..84b6c0e` 合并后的评测代码，在**策略+仿真同一进程**（torch CUDA + JAX +
@@ -351,5 +363,15 @@ ROBOSYN_TASK=sample_loading ROBOSYN_PI05_TORCH_CKPT=<该任务转换后的 ckpt>
 
 一张 48GB 卡上的真实（但慢的）PPO：8 env、batch 160、优化器 offload 到内存（内存 ≥64GB）、
 每 iteration 约 10-15 分钟。用来在烧 H100 之前回答"这个任务上 PPO 涨不涨"。
+
+`sample_loading` 单轮验收已通过（2026-08-25）：`STEPS=1 SAVE_INTER=1`，16 条轨迹、两段
+rollout、actor/critic 更新、更新后权重同步和 `global_step_1` checkpoint 全部完成，退出码 0；
+总耗时 9 分 36 秒。该轮没有成功轨迹（`success_once=0`），所以它证明的是完整训练链路，
+不是策略已得到提升。产物含约 8.5GB 的 `full_weights.pt` 和约 11.8GB 的 DCP shard。
+
+- **必须独占 GPU**。实测 probe 自身在 FSDP state-dict / patch-sync 阶段会把 48GB 卡用到
+  只剩约 0.5GB；同时跑一个 pi0.5 eval（约 19-22GB）会延迟到权重同步时才 OOM。
+  `launch/rlinf_train.sh probe` 默认要求至少 44000MB 空闲显存并打印占卡进程；确有把握时可用
+  `RLINF_MIN_FREE_GPU_MB=0` 跳过，但不建议。
 - **`num_steps`（flow 积分步数）、`noise_level` 用的是 robotwin 的值**（5 / 0.3），没有针对
   RoboSynChallenge 调过。

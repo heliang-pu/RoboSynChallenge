@@ -64,6 +64,18 @@ class UnstackWristImages(_transforms.DataTransformFn):
     """
 
     def __call__(self, data: dict) -> dict:
+        # 排障开关:RSC_DEBUG_TRANSFORM=1 时打印第一条样本里每个键的形状/类型。
+        # 用来定位 RLinf 送进来的样本和 SFT 期望之间的形状差异(比如 state 维度、图像 CHW/HWC)。
+        import os
+
+        if os.environ.get("RSC_DEBUG_TRANSFORM") and not getattr(self, "_debug_printed", False):
+            object.__setattr__(self, "_debug_printed", True)  # frozen dataclass
+            shapes = {
+                k: (tuple(v.shape) if hasattr(v, "shape") else type(v).__name__)
+                for k, v in data.items()
+            }
+            print(f"[RSC_DEBUG_TRANSFORM] sample keys/shapes: {shapes}", flush=True)
+
         if "observation/wrist_image" not in data:
             return data  # 数据集路径:repack 已经产出三键形式
 

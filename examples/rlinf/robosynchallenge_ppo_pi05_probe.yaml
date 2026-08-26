@@ -21,7 +21,10 @@ runner:
   logger:
     experiment_name: "${oc.env:ROBOSYN_TASK}_probe_ppo_pi05"
   max_epochs: 200
-  val_check_interval: 20
+  # 不在训练进程内评测:RLinf 的 env worker 会把 train/eval 两个环境建在同一个进程里,
+  # 而 dexsim 引擎是进程级单例——第二个实例建好后第一个实例的机器人 qpos 从 14 维
+  # 变成 28 维(关节被重复注册),rollout 在 Normalize 处崩。评测用 checkpoint 另起进程做。
+  val_check_interval: -1
   save_interval: 20            # 8.5GB 一个,别存太勤
 
 env:

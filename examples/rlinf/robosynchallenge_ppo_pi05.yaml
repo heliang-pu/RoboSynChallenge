@@ -48,7 +48,10 @@ runner:
   max_steps: -1
 
   only_eval: False
-  val_check_interval: 10
+  # 训练进程内不评测。RLinf 的 env worker 会把 train/eval 两个环境建在同一个进程里,
+  # 而 dexsim 引擎是进程级单例:第二个实例建好后,第一个实例的机器人 qpos 从 14 维变成
+  # 28 维(关节被重复注册),rollout 在 Normalize 处崩。评测用保存的 checkpoint 另起进程做。
+  val_check_interval: -1
   save_interval: 10
 
   resume_dir: null

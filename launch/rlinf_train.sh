@@ -15,6 +15,7 @@
 #   EMBODICHAIN_ROOT        EmbodiChain 仓库,默认 ../EmbodiChain
 #   ROBOSYN_PI05_TORCH_CKPT 转换后的 PyTorch checkpoint 目录(必须)
 #   RLINF_PYTHON            解释器,默认 RLinf venv 里的 python
+#   RLINF_MIN_FREE_GPU_MB    probe 启动所需空闲显存,默认 44000;设 0 跳过检查
 # ----------------------------------------------------------------------------
 set -euo pipefail
 
@@ -87,6 +88,32 @@ fi
 RLinf 的转换器从 checkpoint_dir.parent/assets 找,对不上 openpi 的 <step>/assets 布局;
 scripts/convert_pi05_jax_to_torch.py 会补拷,直接用 RLinf 的脚本则不会。"
 
+# 单卡 pi0.5 probe 的 actor + rollout + 8-env dexsim 峰值接近 45GB。GPU 上若还有
+# 一个普通 pi0.5 eval（约 19-22GB），RLinf 会在 FSDP state_dict / patch sync 阶段才
+# OOM，前面的环境初始化却都能通过，很容易误判成接入层错误。启动前明确拒绝忙卡。
+# 多卡 ppo/grpo 的显存由 Ray placement 管理，这里只检查单卡 probe。
+if [[ "$MODE" == "probe" ]] && command -v nvidia-smi >/dev/null 2>&1; then
+    MIN_FREE_GPU_MB="${RLINF_MIN_FREE_GPU_MB:-44000}"
+    if [[ "$MIN_FREE_GPU_MB" != "0" ]]; then
+        GPU_SELECTOR="${CUDA_VISIBLE_DEVICES:-0}"
+        GPU_SELECTOR="${GPU_SELECTOR%%,*}"
+        FREE_GPU_MB="$(nvidia-smi -i "$GPU_SELECTOR" --query-gpu=memory.free \
+            --format=csv,noheader,nounits 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+        [[ "$FREE_GPU_MB" =~ ^[0-9]+$ ]] \
+            || die "无法读取 GPU $GPU_SELECTOR 的空闲显存(设 RLINF_MIN_FREE_GPU_MB=0 可跳过检查)"
+        if (( FREE_GPU_MB < MIN_FREE_GPU_MB )); then
+            GPU_USERS="$(nvidia-smi -i "$GPU_SELECTOR" \
+                --query-compute-apps=pid,process_name,used_memory \
+                --format=csv,noheader 2>/dev/null || true)"
+            die "GPU $GPU_SELECTOR 只有 ${FREE_GPU_MB}MB 空闲，单卡 probe 至少要求 ${MIN_FREE_GPU_MB}MB。
+检测到的计算进程:
+${GPU_USERS:-  (无；请检查图形进程或调整 RLINF_MIN_FREE_GPU_MB)}
+不要让 eval 和 RLinf probe 共用这张卡；否则会在权重同步阶段延迟 OOM。"
+        fi
+        echo "GPU $GPU_SELECTOR 显存检查通过: ${FREE_GPU_MB}MB free (要求 >= ${MIN_FREE_GPU_MB}MB)"
+    fi
+fi
+
 # RLinf 必须打过补丁,否则 env_type: robosynchallenge 解析不出来
 "$RLINF_PYTHON" "$ROBOSYN_PATH/scripts/patch_rlinf_env.py" --rlinf-root "$RLINF_ROOT" --check >/dev/null 2>&1 \
     || die "RLinf 还没打补丁。先跑:
@@ -118,6 +145,8 @@ export ROBOT_PLATFORM="${ROBOT_PLATFORM:-ALOHA}"
 # 离屏渲染
 export MUJOCO_GL="${MUJOCO_GL:-egl}"
 export PYOPENGL_PLATFORM="${PYOPENGL_PLATFORM:-egl}"
+# 降低 FSDP state_dict / patch sync 临时分配造成的碎片风险；不能弥补并发任务抢显存。
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
 echo "======================================================"
 echo "  模式        : $MODE ($CONFIG_NAME)"
