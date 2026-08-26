@@ -174,27 +174,25 @@ class SampleLoadingEnv(EmbodiedEnv):
         left_gripper_q_mean = None
         right_gripper_q_mean = None
         try:
-            # 保持 (num_envs, dof) 的 batch 布局。原来的 squeeze(0) 只在 num_envs=1 时
-            # 碰巧成立;多环境下 qpos[left_j] 会按 env 轴索引,mean(dim=-1) 也随之错位。
-            qpos = self.robot.get_qpos()
+            qpos = self.robot.get_qpos().squeeze(0)
             left_j = self.robot.get_joint_ids(name="left_eef", remove_mimic=True)
             right_j = self.robot.get_joint_ids(name="right_eef", remove_mimic=True)
 
             if len(left_j) > 0:
-                left_q = qpos[:, left_j]
+                left_q = qpos[left_j]
                 left_gripper_q_mean = left_q.mean(dim=-1)
             if len(right_j) > 0:
-                right_q = qpos[:, right_j]
+                right_q = qpos[right_j]
                 right_gripper_q_mean = right_q.mean(dim=-1)
 
             try:
                 if left_gripper_q_mean is not None:
                     left_eef_x = self.robot.compute_fk(left_q, name="left_eef", to_matrix=True)
-                    left_eef_pos = left_eef_x[:, :3, 3]  # (num_envs, 3)
+                    left_eef_pos = left_eef_x.squeeze(0)[:, 3]
                     cube_to_left = torch.norm(cube_pos - left_eef_pos, dim=-1)
                 if right_gripper_q_mean is not None:
                     right_eef_x = self.robot.compute_fk(right_q, name="right_eef", to_matrix=True)
-                    right_eef_pos = right_eef_x[:, :3, 3]
+                    right_eef_pos = right_eef_x.squeeze(0)[:, 3]
                     cube_to_right = torch.norm(cube_pos - right_eef_pos, dim=-1)
             except Exception:
                 # best-effort: skip FK failures
@@ -315,22 +313,6 @@ class SampleLoadingEnv(EmbodiedEnv):
         success, _, _ = self._evaluate_task_state()
         return success
 
-    def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
-        obs, info = super().reset(seed=seed, options=options)
-
-        # 稳定计数器是 per-env 的锁存,必须只清被重置的那些环境:并行 rollout 里
-        # auto-reset 只带子集 reset_ids,全局清零会把其他环境累积到一半的计数抹掉;
-        # 完全不清则上一集的计数会泄漏到下一集(base_env.reset 还会先调一次
-        # is_task_success,又给计数器 +1)。计数器是懒创建的,首次 reset 时可能还不存在。
-        if hasattr(self, "_place_stable_count"):
-            reset_ids = (options or {}).get(
-                "reset_ids",
-                torch.arange(self.num_envs, dtype=torch.int32, device=self.device),
-            )
-            self._place_stable_count[reset_ids] = 0
-
-        return obs, info
-
     def _is_fall(self, pose: torch.Tensor) -> torch.Tensor:
         # Extract z-axis from rotation matrix (last column, first 3 elements)
         pose_rz = pose[:, :3, 2]
@@ -350,13 +332,11 @@ class SampleLoadingEnv(EmbodiedEnv):
 @register_env("SampleLoadingTest", max_episode_steps=600)
 class SampleLoadingTestEnv(SampleLoadingEnv):
     def compute_task_state(self, **kwargs):
-        success, _, metrics = self._evaluate_task_state()
-        # device 必须跟 success 一致:base_env.step 会把它和 CUDA 上的 truncateds 做或运算
-        return success, torch.zeros(self.num_envs, dtype=torch.bool, device=success.device), metrics
+        success, _, _ =self._evaluate_task_state()
+        return success, torch.zeros(self.num_envs, dtype=torch.bool), None
 
     def is_task_success(self, **kwargs) -> torch.Tensor:
-        # Test 变体刻意恒真(需人工判定),语义不动,只补 device
-        return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+        return torch.ones(self.num_envs, dtype=torch.bool)
 
 @register_env("SampleLoadingAgent", max_episode_steps=600)
 class SampleLoadingAgentEnv(BaseAgentEnv, SampleLoadingEnv):

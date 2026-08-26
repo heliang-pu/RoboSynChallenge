@@ -81,6 +81,7 @@ class MixerOperatingEnv(EmbodiedEnv):
         for part_name in part_names:
             try:
                 link_names = self.robot.get_link_names(name=part_name)
+                print(f"link_names: {link_names}")
             except Exception:
                 link_names = None
             if not link_names:
@@ -151,19 +152,12 @@ class MixerOperatingEnv(EmbodiedEnv):
 
         contact_report = self._button_contact_sensor.get_data()
         valid_mask = contact_report["is_valid"]
-        if not bool(valid_mask.any()):
+        if not valid_mask.any():
             return
 
-        # 不能用 contact_report["user_ids"][valid_mask] 这种布尔掩码索引:它会把
-        # (num_envs, max_contacts, ...) 展平成一维,env 维就没了,于是各环境的接触点被
-        # 混在一起。num_envs=1 时展平后的形状恰好还能用,所以单环境从没暴露过。
-        #
-        # 下面的 button_position.unsqueeze(1) 广播本来就是按 (num_envs, max_contacts, 3)
-        # 写的,说明这段逻辑原本就是为批量设计的。这里保持原始形状,把有效性作为一个
-        # 掩码参与最终的与运算(见 press_mask),而不是提前用它做索引。
-        contact_user_ids = contact_report["user_ids"]
-        contact_impulse = contact_report["impulse"]
-        contact_position = contact_report["position"]
+        contact_user_ids = contact_report["user_ids"][valid_mask]
+        contact_impulse = contact_report["impulse"][valid_mask]
+        contact_position = contact_report["position"][valid_mask]
 
         mixer_contact = torch.isin(
             contact_user_ids[..., 0], self._mixer_user_ids
@@ -183,14 +177,13 @@ class MixerOperatingEnv(EmbodiedEnv):
         in_button_region = button_dist <= self._button_region_radius
 
         impulse_valid = contact_impulse >= self._button_impulse_threshold
-        # valid_mask 在这里参与与运算,替代原先提前做的布尔索引(见上面的注释)
-        press_mask = (
-            valid_mask & mixer_contact & arm_contact & in_button_region & impulse_valid
-        )
+        print(f"Contact impulses: {contact_impulse}")
+        print(f"Contact positions: {contact_position}")
+        print(f"Button position: {button_position}")
+        print(f"in_button_region: {in_button_region}")
+        print(f"impulse_valid: {impulse_valid}")
+        press_mask = mixer_contact & arm_contact & in_button_region & impulse_valid
 
-        # press_mask 现在是 (num_envs, max_contacts);按接触点维度归约,得到每个环境
-        # 本步是否按到了按钮。_button_contact_happened 是 (num_envs,) 的锁存,
-        # 由 reset() 按 reset_ids 逐环境清零。
         self._button_contact_happened |= press_mask.any(dim=1)
 
     def create_demo_action_list(self, *args, **kwargs):
@@ -292,8 +285,10 @@ class MixerOperatingEnv(EmbodiedEnv):
 
         # Success requires the beaker to stay near the mixer in XY plane.
         beaker_mixer_dist = torch.linalg.norm(beaker_pos_xy - beaker_mixer_pos_xy, dim=-1)
+        print(f"Beaker-Mixer distance: {beaker_mixer_dist.item():.4f}")
         dist_threshold = 0.08
         beaker_near_mixer = beaker_mixer_dist <= dist_threshold
+        print(f"beaker_near_mixer:{beaker_near_mixer}, _button_contact_happened:{self._button_contact_happened}, beaker_ret:{beaker_ret}")
         return (~beaker_ret) & beaker_near_mixer & self._button_contact_happened
 
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
@@ -349,7 +344,7 @@ class MixerOperatingTestEnv(MixerOperatingEnv):
         return success, beaker_fall, {}
 
     def is_task_success(self, **kwargs) -> torch.Tensor:
-        return torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+        return torch.ones(self.num_envs, dtype=torch.bool)
 
 @register_env("MixerOperatingAgent", max_episode_steps=600)
 class MixerOperatingAgentEnv(BaseAgentEnv, MixerOperatingEnv):
