@@ -239,3 +239,20 @@ cache/
 
 # 被替换实现的本地快照，仅供回溯，不随仓库分发
 /docs/notes/*_backup_*.py
+
+# ---- 与其他分支对齐：模型权重与训练运行产物 ----
+/report/
+outputs/
+runs/
+wandb/
+# 不保留结尾斜杠，以便同时忽略目录和同名符号链接。
+checkpoints
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+*.onnx
+*.pre_ood
+
+# 本地第三方源码克隆；如需随主仓库分发，应改用正式 submodule。
+/policy/dm05/opendm/
