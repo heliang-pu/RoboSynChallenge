@@ -9,6 +9,25 @@
 
 ---
 
+<!-- branch-readme:begin -->
+
+> **分支导航** — 本仓库按主题分支开发，每个分支的说明就在各自 README 的这个位置。
+>
+> [`main`](../../tree/main) 基线 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · **`feat/rtc-async-pi05`（当前）** 实时分块与异步执行 · [`feat/lila-wam`](../../tree/feat/lila-wam) LiLa-WAM 与覆盖度采集 · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练
+
+## 本分支：`feat/rtc-async-pi05` — pi0.5 实时分块与异步执行
+
+基于 [`sim-recap`](../../tree/sim-recap)。给 pi0.5 加实时分块（RTC）推理与异步 chunk 执行，解决推理延迟期间动作块过期的问题，并做参数矩阵评估。
+
+- `policy/pi05/rtc_runtime.py`：把引导目标重新锚定到当前状态，而不是锚定在发起推理时的旧状态
+- `policy/pi05/src/openpi/models/rtc.py`：RTC 采样
+- `policy/pi05/run_rtc_matrix.py` / `summarize_rtc_matrix.py` / `index_rtc_videos.py`：跨全部 10 个任务的参数矩阵评估、汇总报告、按任务与单元格索引视频
+- `tests/test_rtc_pi05.py`：覆盖真异步下的落步（land-step）覆写与 chunk 耗尽路径
+
+---
+
+<!-- branch-readme:end -->
+
 # 目录
 
 - [项目简介](#项目简介)
