@@ -32,7 +32,7 @@ RoboSynChallenge 是基于 [EmbodiChain](https://dexforce.github.io/EmbodiChain/
 
 - **10 个双臂操作任务**的仿真环境与专家轨迹生成器(按低/中/高三档难度分级);
 - **数据采集流水线**:专家演示 → LeRobot 数据集(v3.0/v2.1)→ 多重校验门 → 训练就绪;
-- **8 个策略的训练/部署集成**:ACT、Diffusion Policy、pi0、pi0.5、DM0.5、G0.5、Motus、XR-1,
+- **9 个策略的训练/部署集成**:ACT、Diffusion Policy、pi0、pi0.5、DM0.5、G0.5、Motus、XR-1、LiLa-WAM,
   统一评估接口,任何策略实现 `deploy_policy.py` 即可接入;
 - **标准化评估协议**:clear / random / random_3p 三种设置,固定判据与随机种子,结果可复现。
 
@@ -53,6 +53,7 @@ RoboSynChallenge/
 │   ├── act/  dp/         #   LeRobot 栈(uv 项目)
 │   ├── pi0/  pi05/       #   openpi JAX 栈(uv 项目)
 │   ├── dm05/ g05/ motus/ xr1/   # 各自的环境搭建脚本
+│   ├── lila_wam/         #   LiLa-WAM(直接吃 LeRobot v2.1 训练)
 │   └── Your_Policy/      #   接入自定义策略的模板
 ├── third_party/          # 收编的外部依赖(evo_rl:sim-RECAP 价值函数栈)
 ├── lerobot_dataset/      # 本地采集的数据默认落在这里
@@ -274,6 +275,7 @@ cd policy/dm05 && bash eval.sh <task_name> <setting> ...
 | G0.5 | VLA(2B VLM + action expert) | GalaxeaVLA / torch | >70 GB/卡,官方 8 卡 | venv(见 policy/g05) |
 | Motus | VLA(视频生成先验) | Motus / DeepSpeed | >80 GB/卡 | venv(见 policy/motus) |
 | XR-1 | VLA(5.5B) | Xiaomi-Robotics / torch | 冻结 VLM 可单卡 48 GB | venv(见 policy/xr1) |
+| LiLa-WAM | 世界-动作模型(冻结 DINOv3 + 0.2B DiT) | LiLa-WAM / torch | 单卡 24 GB | venv(见 policy/lila_wam) |
 
 # 评估结果
 

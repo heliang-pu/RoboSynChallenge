@@ -97,3 +97,8 @@
     全是 positive(round1 占 positive 的 14.4%,全是静止的超时姿态)。打标后屏蔽最后 n_step 帧,或改成用 V* 自举。
 31. **ACP 微调重算 norm stats 会给热启动的基模换尺子**:350 集池(含 52% 失败 rollout 帧)的 state 统计量与
     基模差到 0.77 std、std ×1.6(右臂维),前几千步先要重新适应。ACP 阶段直接复用基模 assets 里的 norm_stats。
+32. **in-sample 分离度选档是记忆化排行榜**:round1 各档在训练池上的成败 V0 分离(3000 差 0.434/AUC 0.998,
+    6500 差 0.692/AUC 1.0)到 40 集新 seed held-out 上全部塌到 0(差 ≤0.01,AUC 0.41–0.60)——分离度越高
+    的档只是背得越熟。选档与质检必须用 held-out:新 seed 采一小批 rollout(SEED_BASE 换掉),
+    `label_rollout_dataset.py --sidecar` 打标后对各档跑 `run_value_infer` + 分离度表,取 held-out AUC 最高者;
+    打标要用交叉法(A 折训 B 折标),否则 advantage 只是记忆残差。
