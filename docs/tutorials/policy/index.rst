@@ -17,3 +17,4 @@ Policy
    pi0
    pi05
    motus
+   lila_wam

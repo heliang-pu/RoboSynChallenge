@@ -233,6 +233,11 @@ checkpoints
 # 本地第三方源码克隆；如需随主仓库分发，应改用正式 submodule。
 /policy/dm05/opendm/
 
+# LiLa-WAM 本地产物：gated 的 DINOv3 权重、按数据集生成的 config、VTT 向量
+/policy/lila_wam/dinov3/
+/policy/lila_wam/configs/generated/
+/policy/lila_wam/task_cond/
+
 # 本地备份与工具状态
 *.bak-*
 *.fixed
