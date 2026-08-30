@@ -116,11 +116,15 @@ workspace/
 
 ```bash
 cd RoboSynChallenge
-uv venv --python 3.11
+uv venv                                       # .python-version 已钉死 3.11
 source .venv/bin/activate
-uv pip install -r requirements.txt            # 精确锁定的仿真依赖(含私有源包)
+uv pip install -r requirements.txt            # 273 个包，全部来自公开 PyPI
 uv pip install -e . --no-deps                 # 本仓库根包
-uv pip install -e ../EmbodiChain --no-deps    # 仿真框架
+uv pip install -e ../EmbodiChain --no-deps            # 仿真框架
+uv pip install -e ../EmbodiChain/embodichain_tasks --no-deps
+
+# 闭源引擎不在 requirements.txt 里，需单独拿 wheel（见 SETUP.md）
+uv pip install dexsim_engine-0.4.3-cp311-*.whl
 ```
 
 装好后可用 `bash launch/check_all_envs.sh` 依次拉起全部任务环境做冒烟检查。
