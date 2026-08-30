@@ -6,11 +6,11 @@
 
 | | 仿真 / 采集 / 评估 | 训练 (π0.5) |
 |---|---|---|
-| 环境 | conda `robosyn` | uv venv，位于 `policy/pi05/.venv` |
-| Python | 3.11.15 | >=3.11,<3.12 |
+| 环境 | uv venv，位于仓库根 `.venv` | uv venv，位于 `policy/pi05/.venv` |
+| Python | 3.11（`.python-version` 钉死） | >=3.11,<3.12 |
 | torch | **2.10.0+cu128** | **2.7.1** |
 | JAX | 不装 | `jax[cuda12]==0.5.3` |
-| 依赖声明 | `environment.yml` + `requirements.txt` | `policy/pi05/pyproject.toml` + `uv.lock` |
+| 依赖声明 | `requirements.txt`（conda 用户可走 `environment.yml`） | `policy/pi05/pyproject.toml` + `uv.lock` |
 | 入口 | `scripts/run_env.py`、`scripts/eval_policy.py` | `policy/pi05/scripts/train.py` |
 
 评估时两边会碰头：`policy/pi05/eval.sh` 的做法是把 openpi 的源码目录**拼进 `PYTHONPATH`** 而不是安装它，从而在仿真环境里调用策略代码，绕开版本冲突。这是有意设计，不要「顺手修好」。
@@ -55,14 +55,21 @@ workspace/
 ## 一、仿真环境
 
 ```bash
-conda env create -f environment.yml
-conda activate robosyn
+uv venv                    # .python-version 已钉死 3.11，不必再写 --python
+source .venv/bin/activate
+uv pip install -r requirements.txt
 
 # 三个本地包，必须可编辑安装（requirements.txt 里已剔除）
-pip install -e ../EmbodiChain
-pip install -e ../EmbodiChain/embodichain_tasks
-pip install -e .
+uv pip install -e ../EmbodiChain --no-deps
+uv pip install -e ../EmbodiChain/embodichain_tasks --no-deps
+uv pip install -e . --no-deps
+
+# 闭源引擎也已从 requirements.txt 剔除（公开 PyPI 上没有），单独装：
+uv pip install dexsim_engine-0.4.3-cp311-*.whl
 ```
+
+习惯 conda 的话 `conda env create -f environment.yml` 也可以，它内部同样是
+`pip install -r requirements.txt`，后面几步一样要手动做。
 
 验证：
 
