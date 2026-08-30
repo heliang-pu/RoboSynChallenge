@@ -225,3 +225,17 @@ training_data/
 *.orig
 cache/
 .hf_home/
+
+# ---- 本地工具与运行产物（所有分支保持一致，勿入版本库）----
+# Claude Code / agent 本地状态；worktrees 体积很大。仅保留已纳入版本库的 skills。
+/.claude/*
+!/.claude/skills/
+/.agents/
+
+# 评估产物与后台任务状态（日志 / pid / 索引，可重新生成）
+/.eval_*/
+/.launch/
+*.pid
+
+# 被替换实现的本地快照，仅供回溯，不随仓库分发
+/docs/notes/*_backup_*.py
