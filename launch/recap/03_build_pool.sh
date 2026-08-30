@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 阶段 2-4:专家数据准备(v2.1→v3.0,按指纹缓存)→ 可选取子集 → 与 rollout 合并 → 写 episode_success
 # 用法: 03_build_pool.sh <task> <tag> <expert_dataset_dir> [expert_episodes=all]   expert_episodes: all | N(前 N 集) | A:B(第 A..B-1 集,如 200:260 取 held-out)
-# 例:   03_build_pool.sh sample_loading round1 /home/phl/FermiBotNas/dataset/RoboSynChallenge/Sim_clean_filtered/cobotmagic_Sim_sample_loading 200
+# 例:   03_build_pool.sh sample_loading round1 "$NAS_ROOT"/dataset/RoboSynChallenge/Sim_clean_filtered/cobotmagic_Sim_sample_loading 200
 # 说明: 专家用清洗版(Sim_clean_filtered);expert_episodes 取前 N 集控制专家:rollout 比例(round1 用了 200:150)。
 #       专家目录若自带 episode_success.json(上一轮发布的合并池),标签按边车恢复,不会把失败集错标成功。
 set -uo pipefail; source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"

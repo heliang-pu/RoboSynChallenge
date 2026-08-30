@@ -106,8 +106,19 @@ def _as_int_or_none(value):
 def select_cuda_device(config):
     """Align an unqualified policy CUDA device with the simulator GPU."""
     pytorch_device = str(config.get("pytorch_device", ""))
+    gpu_id = int(config.get("gpu_id", 0))
     if pytorch_device.startswith("cuda") and torch.cuda.is_available():
-        torch.cuda.set_device(int(config.get("gpu_id", 0)))
+        torch.cuda.set_device(gpu_id)
+    # JAX 权重默认落在 jax.devices()[0]。当仿真被指到非 0 号物理卡时(多卡机上
+    # 0 号卡常被别的进程占满),权重必须跟着 gpu_id 走,否则 device_put 会 OOM。
+    try:
+        import jax
+
+        _devs = jax.devices()
+        if 0 <= gpu_id < len(_devs):
+            jax.config.update("jax_default_device", _devs[gpu_id])
+    except Exception:  # JAX 不可用或后端未初始化时静默跳过
+        pass
 
 
 def resolve_episode_max_steps(config, gym_config):

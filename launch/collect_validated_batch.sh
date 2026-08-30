@@ -80,8 +80,12 @@ if [ "$FORMAT" == "3_0" ]; then
     exit 0
 fi
 
+# 种子边车(--seed 采集时产生)会被转换器丢掉,先存后还
+SIDECAR="$DATASET_PATH/episode_success.json"
+[ -f "$SIDECAR" ] && cp "$SIDECAR" "$DATASET_PATH.episode_success.stash.json"
 python "$REPO_ROOT/scripts/convert_lerobot3.0_to_2.1.py" \
     --repo-id "$DATASET_ID" --root "$(dirname "$DATASET_PATH")"
+[ -f "$DATASET_PATH.episode_success.stash.json" ] && mv "$DATASET_PATH.episode_success.stash.json" "$SIDECAR"
 
 MODEL_PYTHON=${MODEL_PYTHON:-"$REPO_ROOT/policy/pi05/.venv/bin/python"}
 if [ ! -x "$MODEL_PYTHON" ]; then
