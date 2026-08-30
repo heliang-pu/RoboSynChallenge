@@ -99,6 +99,9 @@ class AssetsConfig:
 class DataConfig:
     # LeRobot repo id. If None, fake data will be created.
     repo_id: str | None = None
+    # Optional set of LeRobot repos concatenated into one training dataset.
+    # ``repo_id`` remains the synthetic asset id used for shared norm stats.
+    lerobot_repo_ids: Sequence[str] = ()
     # Directory within the assets directory containing the data assets.
     asset_id: str | None = None
     # Contains precomputed normalization stats. If None, normalization will not be performed.
@@ -433,6 +436,7 @@ class LeRobotEmbodiChainDataConfig(DataConfigFactory):
     # 追加 positive 标签;为 None 时行为与原始配置完全一致。
     acp_indicator_key: str | None = None
     acp_tag_dropout: float = 0.3
+    source_repo_ids: Sequence[str] = ()
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
         # The repack transform is *only* applied to the data coming from the dataset,
@@ -507,6 +511,7 @@ class LeRobotEmbodiChainDataConfig(DataConfigFactory):
         # We return all data transforms for training and inference. No need to change anything here.
         return dataclasses.replace(
             self.create_base_config(assets_dirs, model_config),
+            lerobot_repo_ids=self.source_repo_ids,
             repack_transforms=repack_transform,
             data_transforms=data_transforms,
             model_transforms=model_transforms,
@@ -1020,6 +1025,67 @@ _CONFIGS = [
         num_train_steps=20_000,
         batch_size=64,
         fsdp_devices=1,
+    ),
+    TrainConfig(
+        # Plain expert SFT control: no RECAP/ACP transform. This keeps the
+        # original sample-loading prompt and changes only the action chunk from
+        # the pi0.5 default 50 to 64.
+        name="pi05_sample_loading_h64_expert",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=64),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/cobotmagic_Sim_sample_loading_expert_v21",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+            acp_indicator_key=None,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            os.environ.get("PI05_H64_BASE_WEIGHTS", "gs://openpi-assets/checkpoints/pi05_base/params")
+        ),
+        num_train_steps=_env_positive_int("PI05_H64_NUM_TRAIN_STEPS", 50_000),
+        batch_size=_env_positive_int("PI05_H64_BATCH_SIZE", 64),
+        num_workers=_env_positive_int("PI05_H64_NUM_WORKERS", 64),
+        fsdp_devices=_env_positive_int("PI05_H64_FSDP_DEVICES", 1),
+        ema_decay=None,
+        checkpoint_base_dir=os.environ.get("PI05_H64_CHECKPOINT_BASE_DIR", "./checkpoints"),
+        save_interval=_env_positive_int("PI05_H64_SAVE_INTERVAL", 2500),
+        keep_period=_env_positive_int("PI05_H64_SAVE_INTERVAL", 2500),
+    ),
+    TrainConfig(
+        name="pi05_all10_h64_expert",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=64),
+        data=LeRobotEmbodiChainDataConfig(
+            # Synthetic repo id: only names the shared normalization assets.
+            repo_id="RoboSynChallenge/all10_expert_h64",
+            source_repo_ids=tuple(
+                f"RoboSynChallenge/all10_expert_v21/cobotmagic_Sim_{task}"
+                for task in (
+                    "click_bell",
+                    "drawer_open_place",
+                    "handle_basket",
+                    "item_assembly",
+                    "items_handover",
+                    "manipulate_pipette",
+                    "mixer_operating",
+                    "sample_loading",
+                    "table_rearrangement",
+                    "water_pouring",
+                )
+            ),
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+            acp_indicator_key=None,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            os.environ.get("PI05_ALL10_BASE_WEIGHTS", "gs://openpi-assets/checkpoints/pi05_base/params")
+        ),
+        num_train_steps=_env_positive_int("PI05_ALL10_NUM_TRAIN_STEPS", 100_000),
+        batch_size=_env_positive_int("PI05_ALL10_BATCH_SIZE", 64),
+        num_workers=_env_positive_int("PI05_ALL10_NUM_WORKERS", 64),
+        fsdp_devices=_env_positive_int("PI05_ALL10_FSDP_DEVICES", 1),
+        ema_decay=None,
+        checkpoint_base_dir=os.environ.get("PI05_ALL10_CHECKPOINT_BASE_DIR", "./checkpoints"),
+        save_interval=_env_positive_int("PI05_ALL10_SAVE_INTERVAL", 2500),
+        keep_period=_env_positive_int("PI05_ALL10_SAVE_INTERVAL", 2500),
     ),
     TrainConfig(
         name="pi05_water_pouring",
