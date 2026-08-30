@@ -9,6 +9,27 @@
 
 ---
 
+<!-- branch-readme:begin -->
+
+> **分支导航** — 本仓库按主题分支开发，每个分支的说明就在各自 README 的这个位置。
+>
+> [`main`](../../tree/main) 基线 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · [`feat/lila-wam`](../../tree/feat/lila-wam) LiLa-WAM 与覆盖度采集 · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · **`ppo-post-training`（当前）** PPO 后训练
+
+## 本分支：`ppo-post-training` — 用 RLinf 对 pi0.5 做 PPO / GRPO 后训练
+
+把 pi0.5 从 JAX 搬到 PyTorch，接进 RLinf 的 PPO 训练回路。
+
+- `docs/tutorials/rlinf_ppo.md`：为什么要转 PyTorch、checkpoint 转换与验证、给 RLinf 打补丁、奖励与终止怎么接、观测通路，以及**一个必须知道的配置陷阱**（`norm_stats_path` 与 `repo_id` 的关系）
+- `envs/rlinf/`：训练环境冻结成 uv lock，附一键安装
+- `launch/run_sample_loading_until_22.sh`：sample_loading 的 rollout runner，路径全走环境变量（`RLINF_ROOT` / `ROBOSYN_PI05_TORCH_CKPT`）
+- EmbodiChain 适配的修复以 patch 形式随仓库分发；单卡 probe 模式便于在小机器上验证回路
+
+> 成功判定已回退到主办方口径，本分支上不再使用本地改写的 `mixer_operating` / `sample_loading` 判定。
+
+---
+
+<!-- branch-readme:end -->
+
 # 目录
 
 - [项目简介](#项目简介)
