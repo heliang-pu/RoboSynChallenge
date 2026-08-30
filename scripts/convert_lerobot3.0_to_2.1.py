@@ -519,6 +519,7 @@ def convert_dataset(
     repo_id: str,
     root: str | Path | None = None,
     force_conversion: bool = False,
+    output_root: str | Path | None = None,
 ) -> None:
     root = HF_LEROBOT_HOME / repo_id if root is None else Path(root) / repo_id
 
@@ -542,13 +543,19 @@ def convert_dataset(
         if ft.get("dtype") == "video"
     ]
 
+    # By default retain the legacy in-place conversion behavior.  Supplying an
+    # explicit output directory is non-destructive: v3 remains untouched and
+    # v2.1 is written as an independent sibling/tree (useful for NAS sources).
+    in_place = output_root is None
     backup_root = root.parent / f"{root.name}_{V30}"
-    new_root = root.parent / f"{root.name}_{V21}"
+    new_root = root.parent / f"{root.name}_{V21}" if in_place else Path(output_root)
 
-    if backup_root.is_dir():
+    if new_root.exists():
+        raise FileExistsError(
+            f"Refusing to overwrite existing conversion output: {new_root}"
+        )
+    if in_place and backup_root.is_dir():
         shutil.rmtree(backup_root)
-    if new_root.is_dir():
-        shutil.rmtree(new_root)
 
     new_root.mkdir(parents=True, exist_ok=True)
 
@@ -560,8 +567,9 @@ def convert_dataset(
     convert_episodes_metadata(new_root, episode_records)
     copy_ancillary_directories(root, new_root)
 
-    shutil.move(str(root), str(backup_root))
-    shutil.move(str(new_root), str(root))
+    if in_place:
+        shutil.move(str(root), str(backup_root))
+        shutil.move(str(new_root), str(root))
 
 
 def parse_args() -> argparse.Namespace:
@@ -582,6 +590,15 @@ def parse_args() -> argparse.Namespace:
         "--force-conversion",
         action="store_true",
         help="Ignore any existing local snapshot and re-download it from the Hub.",
+    )
+    parser.add_argument(
+        "--output-root",
+        type=str,
+        default=None,
+        help=(
+            "Write v2.1 to this exact directory without modifying the v3 source. "
+            "The directory must not already exist."
+        ),
     )
     return parser.parse_args()
 

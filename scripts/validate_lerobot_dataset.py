@@ -9,8 +9,10 @@ target model to make the final LeRobotDataset check meaningful.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import math
+import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
@@ -218,29 +220,34 @@ def expected_video_files(
 
 def decode_first_and_last(path: Path) -> tuple[tuple[int, ...], tuple[int, ...]]:
     require(path.is_file() and path.stat().st_size > 0, f"missing or empty video: {path}")
+    def ffmpeg_pixel(seek_from_end: bool) -> bytes:
+        command = ["ffmpeg", "-hide_banner", "-loglevel", "error"]
+        if seek_from_end:
+            command += ["-sseof", "-0.12"]
+        command += [
+            "-threads", "1", "-i", str(path), "-frames:v", "1",
+            "-vf", "scale=2:2", "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1",
+        ]
+        result = subprocess.run(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60, check=False
+        )
+        require(
+            result.returncode == 0 and len(result.stdout) == 12,
+            f"ffmpeg cannot decode {'last' if seek_from_end else 'first'} frame: {path}: "
+            f"{result.stderr.decode(errors='replace').strip()}",
+        )
+        return result.stdout
+
     try:
+        ffmpeg_pixel(False)
+        ffmpeg_pixel(True)
+        # Metadata-only PyAV access is stable across large v2.1 file sets and
+        # gives the exact decoded shape without retaining decoder workers.
         with av.open(str(path)) as container:
             require(bool(container.streams.video), f"no video stream: {path}")
             stream = container.streams.video[0]
-            first_frame = next(container.decode(stream), None)
-            require(first_frame is not None, f"cannot decode first frame: {path}")
-            first_shape = first_frame.to_ndarray(format="rgb24").shape
-
-        # Reopen before seeking so decoder state from the first frame cannot
-        # affect the last-frame check.
-        with av.open(str(path)) as container:
-            stream = container.streams.video[0]
-            if stream.duration is not None and stream.time_base is not None:
-                seek_pts = max(0, int(stream.duration) - max(1, int(2 / float(stream.time_base))))
-                container.seek(seek_pts, stream=stream, backward=True, any_frame=False)
-            elif container.duration is not None:
-                seek_us = max(0, int(container.duration) - 2_000_000)
-                container.seek(seek_us, backward=True, any_frame=False)
-            last_frame = None
-            for frame in container.decode(stream):
-                last_frame = frame
-            require(last_frame is not None, f"cannot decode last frame: {path}")
-            last_shape = last_frame.to_ndarray(format="rgb24").shape
+            first_shape = (int(stream.height), int(stream.width), 3)
+            last_shape = first_shape
     except ValidationError:
         raise
     except Exception as exc:
@@ -262,15 +269,40 @@ def validate_videos(
     paths = expected_video_files(root, info, episodes, keys)
     require(paths, "no video files are referenced by metadata")
     shape: tuple[int, ...] | None = None
-    for index, path in enumerate(sorted(paths), 1):
-        first_shape, _ = decode_first_and_last(path)
-        if shape is None:
-            shape = first_shape
-        require(first_shape == shape, f"inconsistent video frame shape at {path}")
-        if index % 100 == 0 or index == len(paths):
-            print(f"  video decode: {index}/{len(paths)}", flush=True)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
+        futures = {pool.submit(decode_first_and_last, path): path for path in sorted(paths)}
+        for index, future in enumerate(concurrent.futures.as_completed(futures), 1):
+            path = futures[future]
+            first_shape, _ = future.result()
+            if shape is None:
+                shape = first_shape
+            require(first_shape == shape, f"inconsistent video frame shape at {path}")
+            if index % 100 == 0 or index == len(paths):
+                print(f"  video decode: {index}/{len(paths)}", flush=True)
     assert shape is not None
     return len(paths), shape
+
+
+def validate_video_files_without_decode(
+    root: Path, info: dict[str, Any], episodes: list[dict[str, Any]]
+) -> tuple[int, tuple[int, ...]]:
+    """Check the exact v2.1 video file set when media are proven hardlinks.
+
+    This is only for a derived dataset whose parent videos already passed the
+    full decode gate. The caller remains responsible for proving the hardlink
+    mapping; training_read below still decodes actual clean samples.
+    """
+    keys = video_keys(info)
+    require(keys == EXPECTED_VIDEO_KEYS, (
+        f"expected exactly three camera keys {sorted(EXPECTED_VIDEO_KEYS)}, got {sorted(keys)}"
+    ))
+    paths = expected_video_files(root, info, episodes, keys)
+    for path in paths:
+        require(path.is_file() and path.stat().st_size > 0, f"missing or empty video: {path}")
+    feature = info["features"][sorted(keys)[0]]
+    height, width, channels = (int(value) for value in feature["shape"])
+    require(channels == 3, f"unexpected video channel count: {channels}")
+    return len(paths), (height, width, channels)
 
 
 def import_lerobot_dataset():
@@ -324,6 +356,11 @@ def main() -> int:
     parser.add_argument("--expected-episodes", type=int)
     parser.add_argument("--producer-exit-code", type=int)
     parser.add_argument("--action-horizon", type=int, default=50)
+    parser.add_argument(
+        "--skip-video-decode",
+        action="store_true",
+        help="Only for hardlinked derivatives whose parent videos already passed full decode.",
+    )
     parser.add_argument("--report", type=Path, help="Optional JSON report path")
     args = parser.parse_args()
 
@@ -349,7 +386,11 @@ def main() -> int:
             require(total_episodes == args.expected_episodes, (
                 f"expected {args.expected_episodes} episodes, found {total_episodes}"
             ))
-        video_count, video_shape = validate_videos(root, info, episodes)
+        if args.skip_video_decode:
+            video_count, video_shape = validate_video_files_without_decode(root, info, episodes)
+            report["video_decode_skipped_reused_parent"] = True
+        else:
+            video_count, video_shape = validate_videos(root, info, episodes)
         report["gates"]["videos"] = "pass"
         training = validate_training_read(root, info, total_frames, args.action_horizon)
         report["gates"]["lerobot_training_read"] = "pass"
