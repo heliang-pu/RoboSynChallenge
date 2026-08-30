@@ -89,8 +89,21 @@ def _load_recorder_lerobot_dataset():
         return None
 
 
-LeRobotDataset = _load_recorder_lerobot_dataset()
-LEROBOT_AVAILABLE = LeRobotDataset is not None
+_RecorderLeRobotDataset = _load_recorder_lerobot_dataset()
+LEROBOT_AVAILABLE = _RecorderLeRobotDataset is not None
+
+if LEROBOT_AVAILABLE:
+    class LeRobotDataset(_RecorderLeRobotDataset):
+        """Bridge recorder arguments across modern LeRobot minor versions."""
+
+        @classmethod
+        def create(cls, *args, metadata_buffer_size: int | None = None, **kwargs):
+            dataset = super().create(*args, **kwargs)
+            if metadata_buffer_size is not None and hasattr(dataset.meta, "metadata_buffer_size"):
+                dataset.meta.metadata_buffer_size = metadata_buffer_size
+            return dataset
+else:
+    LeRobotDataset = None
 
 # EmbodiChain may have imported its dataset module before this compatibility
 # bridge ran.  Refresh its module globals before subclassing the recorder.
