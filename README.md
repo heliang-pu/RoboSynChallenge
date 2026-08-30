@@ -9,6 +9,22 @@
 
 ---
 
+<!-- branch-readme:begin -->
+
+> **分支导航** — 本仓库按主题分支开发，每个分支的说明就在各自 README 的这个位置。
+>
+> **`main`（当前）** 基线 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · [`feat/lila-wam`](../../tree/feat/lila-wam) LiLa-WAM 与覆盖度采集 · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练
+
+## 本分支：`main` — 基线
+
+与主办方上游 `EDEM-AI/RoboSynChallenge` 保持同步的基线，只放所有实验分支共用的东西：完整的中文项目说明、按需安装的 uv 训练环境、10 个任务的采集/训练/评估流程，以及**回退到官方口径的成功判定**（本地改过的判定已全部撤回，避免与排行榜对不上）。
+
+功能开发不在这里做，各自在下面的主题分支上。上游有更新时先合到本分支，再由各分支合过去。
+
+---
+
+<!-- branch-readme:end -->
+
 # 目录
 
 - [项目简介](#项目简介)
