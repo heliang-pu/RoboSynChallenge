@@ -9,6 +9,27 @@
 
 ---
 
+<!-- branch-readme:begin -->
+
+> **分支导航** — 本仓库按主题分支开发，每个分支的说明就在各自 README 的这个位置。
+>
+> [`main`](../../tree/main) 基线 · **`sim-recap`（当前）** RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · [`feat/lila-wam`](../../tree/feat/lila-wam) LiLa-WAM 与覆盖度采集 · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练
+
+## 本分支：`sim-recap` — 把 RECAP 搬进仿真
+
+用仿真 rollout 自举出价值函数，再把 advantage 写回数据集，供 pi0.5 做 ACP 微调。
+
+- **九步流水线** `launch/recap/01_rollout.sh` … `09_bake_prompt.sh`：策略 rollout → 自动成功标签 → 构建专家/rollout 混合池 → 价值函数训练 → 质检与 checkpoint 选择 → 发布 LeRobot v2.1 数据集（reward / no-reward 两版）→ ACP 微调 → 评估
+- **多数据集训练**：`DataConfig.lerobot_repo_ids` 支持把多个 LeRobot repo 拼成一个训练集，`repo_id` 仍作共享 norm stats 的资产 id
+- **海光 DCU**：分布式训练配置、数据加载并行度调优、checkpoint 增量回传
+- 说明文档见 `docs/tutorials/sim_recap.md`
+
+> 训练机地址不入库。跑 `launch/recap/sync_*.sh`、`upload_*_to_hygon.sh` 前需 `export RECAP_REMOTE=user@host`（另有 `RECAP_PORT` / `RECAP_KEY`）。
+
+---
+
+<!-- branch-readme:end -->
+
 # 目录
 
 - [项目简介](#项目简介)
