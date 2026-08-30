@@ -21,6 +21,8 @@ is why ``H + d`` must not exceed the model's action horizon.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 import sys
@@ -30,6 +32,92 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 from openpi.models import rtc as _rtc  # noqa: E402
 
 ASYNC_MODES = ("off", "sim", "real")
+
+
+@dataclass(frozen=True)
+class PhaseChunkSelection:
+    """One phase selected for the current environment step."""
+
+    name: str
+    start_step: int
+    end_step: int | None
+    execution_horizon: int
+
+    def step_budget(self, current_step: int) -> int:
+        """Do not let one policy call cross into the next phase."""
+        if self.end_step is None:
+            return self.execution_horizon
+        return min(self.execution_horizon, self.end_step - int(current_step))
+
+
+class PhaseChunkSchedule:
+    """Map semantic/time phases to different open-loop execution horizons.
+
+    The policy still predicts its full model action horizon (50 actions for the
+    current pi0.5 checkpoint).  This schedule changes how many actions are
+    executed before replanning.  Phases are half-open intervals
+    ``[start_step, end_step)`` and must cover the episode contiguously from zero.
+    The final phase may omit ``end_step``.
+    """
+
+    def __init__(self, phases: list[dict]):
+        if not isinstance(phases, list) or not phases:
+            raise ValueError("phase_action_chunks must be a non-empty list")
+        parsed = []
+        for index, raw in enumerate(phases):
+            if not isinstance(raw, dict):
+                raise ValueError(f"phase_action_chunks[{index}] must be a mapping")
+            name = str(raw.get("name", f"phase_{index}"))
+            start = int(raw.get("start_step", 0 if index == 0 else -1))
+            end_value = raw.get("end_step")
+            end = None if end_value is None else int(end_value)
+            horizon = int(raw.get("chunk", raw.get("execution_horizon", 0)))
+            if start < 0:
+                raise ValueError(f"phase {name!r} requires start_step")
+            if end is not None and end <= start:
+                raise ValueError(f"phase {name!r} end_step must exceed start_step")
+            if horizon < 1:
+                raise ValueError(f"phase {name!r} chunk must be >= 1")
+            parsed.append(PhaseChunkSelection(name, start, end, horizon))
+
+        if parsed[0].start_step != 0:
+            raise ValueError("phase_action_chunks must start at step 0")
+        for previous, current in zip(parsed, parsed[1:]):
+            if previous.end_step is None:
+                raise ValueError(f"open-ended phase {previous.name!r} must be last")
+            if previous.end_step != current.start_step:
+                raise ValueError(
+                    "phase_action_chunks must be contiguous: "
+                    f"{previous.name!r} ends at {previous.end_step}, "
+                    f"{current.name!r} starts at {current.start_step}"
+                )
+        self.phases = tuple(parsed)
+
+    def select(self, current_step: int) -> PhaseChunkSelection:
+        step = int(current_step)
+        if step < 0:
+            raise ValueError(f"current_step must be >= 0, got {step}")
+        for phase in self.phases:
+            if step >= phase.start_step and (
+                phase.end_step is None or step < phase.end_step
+            ):
+                return phase
+        final = self.phases[-1]
+        raise RuntimeError(
+            f"phase_action_chunks does not cover step {step}; "
+            f"final phase {final.name!r} ends at {final.end_step}"
+        )
+
+    def describe(self) -> list[dict]:
+        return [
+            {
+                "name": phase.name,
+                "start_step": phase.start_step,
+                "end_step": phase.end_step,
+                "chunk": phase.execution_horizon,
+            }
+            for phase in self.phases
+        ]
 
 
 class ChunkScheduler:
@@ -64,16 +152,10 @@ class ChunkScheduler:
         self.rtc_enabled = bool(rtc_enabled)
         self.prefix_attention_schedule = prefix_attention_schedule
 
-        # A chunk launched d steps early must still cover H steps of execution,
-        # so H + d actions have to fit inside the model's action horizon.
-        requested = int(execution_horizon)
-        self.execution_horizon = min(requested, self.action_horizon - self.inference_delay)
-        if self.execution_horizon < 1:
-            raise ValueError(
-                f"inference_delay={self.inference_delay} leaves no room inside "
-                f"action_horizon={self.action_horizon}"
-            )
-        self.clamped_from = requested if self.execution_horizon != requested else None
+        self.execution_horizon = 0
+        self.execution_horizon_requested = 0
+        self.clamped_from = None
+        self.set_execution_horizon(execution_horizon)
 
         self.reset()
 
@@ -84,8 +166,27 @@ class ChunkScheduler:
         self.chunk = None            # active chunk, absolute env-space actions (T, A)
         self.chunk_t0 = None         # env step that chunk[0] corresponds to
         self.pending = None          # chunk computed but not yet landed
+        self.force_replan = False    # phase change requests immediate replacement
         self.launches = 0
         self.guided_launches = 0
+
+    def set_execution_horizon(self, execution_horizon: int) -> bool:
+        """Change the replan interval, returning whether the effective H changed."""
+        requested = int(execution_horizon)
+        if requested < 1:
+            raise ValueError(f"execution_horizon must be >= 1, got {requested}")
+        available = self.action_horizon - self.inference_delay
+        if available < 1:
+            raise ValueError(
+                f"inference_delay={self.inference_delay} leaves no room inside "
+                f"action_horizon={self.action_horizon}"
+            )
+        effective = min(requested, available)
+        changed = effective != self.execution_horizon
+        self.execution_horizon = effective
+        self.execution_horizon_requested = requested
+        self.clamped_from = requested if effective != requested else None
+        return changed
 
     # ------------------------------------------------------------- schedule
 
@@ -99,9 +200,17 @@ class ChunkScheduler:
         """True when inference for the next chunk has to start now."""
         if self.pending is not None:
             return False
+        if self.force_replan:
+            return True
         if self.chunk is None:
             return True
         return self.step_index >= self.next_land_step() - self.inference_delay
+
+    def request_replan(self) -> None:
+        """Force the next scheduler tick to replace the active chunk."""
+        if self.pending is not None:
+            raise RuntimeError("cannot force a replan while a chunk is pending")
+        self.force_replan = True
 
     def should_adopt(self) -> bool:
         return self.pending is not None and self.step_index >= self.pending["land_step"]
@@ -160,6 +269,7 @@ class ChunkScheduler:
             "t0": int(launch_step),
             "land_step": int(launch_step) + self.inference_delay if land_step is None else int(land_step),
         }
+        self.force_replan = False
         self.launches += 1
 
     def adopt(self) -> None:
@@ -190,7 +300,8 @@ class ChunkScheduler:
         return {
             "action_horizon": self.action_horizon,
             "execution_horizon": self.execution_horizon,
-            "execution_horizon_requested": self.clamped_from,
+            "execution_horizon_requested": self.execution_horizon_requested,
+            "execution_horizon_clamped_from": self.clamped_from,
             "inference_delay": self.inference_delay,
             "rtc_enabled": self.rtc_enabled,
             "prefix_attention_schedule": self.prefix_attention_schedule,

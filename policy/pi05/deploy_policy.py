@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from pi_model import PI0
 from policy.inference_timing import finish_inference, start_inference
-from rtc_runtime import ASYNC_MODES, ChunkScheduler
+from rtc_runtime import ASYNC_MODES, ChunkScheduler, PhaseChunkSchedule
 
 
 
@@ -99,6 +99,18 @@ def get_model(usr_args):
     if async_mode == "off":
         inference_delay = 0
     rtc_enabled = bool(usr_args.get("rtc", False))
+    phase_config = usr_args.get("phase_action_chunks")
+    phase_schedule = PhaseChunkSchedule(phase_config) if phase_config else None
+    if phase_schedule is not None and async_mode != "off":
+        raise ValueError(
+            "phase_action_chunks currently requires async_mode='off'; changing H "
+            "while an asynchronous inference is in flight is not deterministic"
+        )
+    initial_execution_horizon = (
+        phase_schedule.select(0).execution_horizon
+        if phase_schedule is not None
+        else pi0_step
+    )
 
     if train_config_name is None or model_name is None:
         raise ValueError(
@@ -118,16 +130,21 @@ def get_model(usr_args):
     model.async_mode = async_mode
     model.scheduler = ChunkScheduler(
         action_horizon=model.action_horizon,
-        execution_horizon=pi0_step,
+        execution_horizon=initial_execution_horizon,
         inference_delay=inference_delay,
         rtc_enabled=rtc_enabled,
         prefix_attention_schedule=str(usr_args.get("prefix_attention_schedule", "exp")),
     )
     model.executor = ThreadPoolExecutor(max_workers=1) if async_mode == "real" else None
+    model.phase_chunk_schedule = phase_schedule
+    model.active_phase = None
 
     setup = model.scheduler.describe()
     setup["async_mode"] = async_mode
     setup["rtc_correction"] = model.rtc_correction
+    setup["phase_action_chunks"] = (
+        phase_schedule.describe() if phase_schedule is not None else None
+    )
     print(f"[pi05] chunk runtime: {setup}")
     if model.scheduler.clamped_from is not None:
         print(
@@ -166,11 +183,29 @@ def eval(env, model, obs):
         model.set_language(instruction)
 
     sched = model.scheduler
+    phase_schedule = getattr(model, "phase_chunk_schedule", None)
+    if phase_schedule is not None:
+        phase = phase_schedule.select(sched.step_index)
+        sched.set_execution_horizon(phase.execution_horizon)
+        execution_budget = min(
+            sched.execution_horizon,
+            phase.step_budget(sched.step_index),
+        )
+        if model.active_phase != phase.name:
+            if model.active_phase is not None:
+                sched.request_replan()
+            print(
+                f"[pi05] phase={phase.name!r} step={sched.step_index} "
+                f"execution_horizon={sched.execution_horizon}"
+            )
+            model.active_phase = phase.name
+    else:
+        execution_budget = sched.execution_horizon
     inference_times_s = []
     final_obs, info, truncated = obs, None, False
     steps_taken = 0
 
-    while steps_taken < sched.execution_horizon:
+    while steps_taken < execution_budget:
         # `sched.pending` only fills once a chunk exists, so in `real` mode the
         # in-flight future is what keeps us from launching the same replan twice.
         in_flight = getattr(model, "pending_future", None) is not None
@@ -233,4 +268,5 @@ def reset_model(model):
         pending.cancel()
         model.pending_future = None
     model.scheduler.reset()
+    model.active_phase = None
     model.reset_obsrvationwindows()

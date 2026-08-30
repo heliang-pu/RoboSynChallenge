@@ -4,7 +4,10 @@
 #!/usr/bin/python3
 """
 import json
+import dataclasses
+import os
 import sys
+from pathlib import Path
 import etils.epath as epath
 import jax
 import numpy as np
@@ -25,7 +28,39 @@ from openpi.training import config as _config
 from openpi.training import data_loader as _data_loader
 from openpi import transforms as _transforms
 from openpi.training import checkpoints as _checkpoints
-import os
+
+
+def _checkpoint_asset_id(checkpoint_dir: str) -> str:
+    """Resolve the one norm-stat asset carried by a task checkpoint.
+
+    ``pi05_base_robosynchallenge_full`` is shared by all challenge tasks, so
+    its registry-time ``repo_id`` cannot identify which task checkpoint is
+    being loaded.  The exported checkpoint is authoritative: every task
+    directory contains ``assets/<repo_id>/norm_stats.json``.
+    """
+    assets_root = Path(checkpoint_dir) / "assets"
+    matches = sorted(assets_root.rglob("norm_stats.json"))
+    if len(matches) != 1:
+        raise ValueError(
+            f"Expected exactly one norm_stats.json below {assets_root}, "
+            f"found {len(matches)}: {matches}"
+        )
+    return matches[0].parent.relative_to(assets_root).as_posix()
+
+
+def _config_for_checkpoint(train_config_name: str, checkpoint_dir: str):
+    """Bind a shared training config to the task assets stored in a checkpoint."""
+    asset_id = _checkpoint_asset_id(checkpoint_dir)
+    config = _config.get_config(train_config_name)
+    return dataclasses.replace(
+        config,
+        data=dataclasses.replace(
+            config.data,
+            repo_id=asset_id,
+            assets=dataclasses.replace(config.data.assets, asset_id=asset_id),
+        ),
+    )
+
 
 class PI0:
 
@@ -47,15 +82,31 @@ class PI0:
         # `deploy_policy.eval` reads this for its CUDA-synchronized timing.
         self.pytorch_device = pytorch_device
 
-        specified_path = f"policy/pi05/checkpoints/{self.train_config_name}/{self.model_name}/{self.checkpoint_id}/assets/"
-        entries = os.listdir(specified_path)
-        assets_id = entries[0]
-
-        config = _config.get_config(self.train_config_name)
+        # Large evaluation sweeps keep checkpoints on shared storage (or in a
+        # sweep-managed local cache) instead of materializing them below the
+        # repository.  ``PI05_CHECKPOINT_RUN_ROOT`` points directly at the
+        # experiment directory whose children are numeric checkpoint steps.
+        checkpoint_run_root = os.environ.get("PI05_CHECKPOINT_RUN_ROOT")
+        if checkpoint_run_root:
+            checkpoint_dir = str(Path(checkpoint_run_root) / str(self.checkpoint_id))
+        else:
+            checkpoint_base_root = os.environ.get(
+                "PI05_CHECKPOINT_ROOT", "policy/pi05/checkpoints"
+            )
+            checkpoint_dir = str(
+                Path(checkpoint_base_root)
+                / self.train_config_name
+                / self.model_name
+                / str(self.checkpoint_id)
+            )
+        config = _config_for_checkpoint(
+            self.train_config_name,
+            checkpoint_dir,
+        )
         self.action_horizon = int(config.model.action_horizon)
         self.policy = _policy_config.create_trained_policy(
             config,
-            f"policy/pi05/checkpoints/{self.train_config_name}/{self.model_name}/{self.checkpoint_id}",
+            checkpoint_dir,
             pytorch_device=pytorch_device,
             )
         print("loading model success!")
@@ -68,7 +119,6 @@ class PI0:
         # chunk to a stale base state.  Rebuild the training-time input path for
         # actions so the previous plan can be re-expressed against the *current*
         # state before it is used as a target.
-        checkpoint_dir = f"policy/pi05/checkpoints/{self.train_config_name}/{self.model_name}/{self.checkpoint_id}"
         data_config = config.data.create(config.assets_dirs, config.model)
         norm_stats = _checkpoints.load_norm_stats(
             epath.Path(checkpoint_dir) / "assets", data_config.asset_id

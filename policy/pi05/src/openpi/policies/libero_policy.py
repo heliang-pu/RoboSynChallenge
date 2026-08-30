@@ -125,15 +125,36 @@ class ACPAdvantageTag(transforms.DataTransformFn):
             prompt = prompt.decode("utf-8")
         prompt = str(prompt)
 
+        baked_indicator = None
+        if prompt == "Advantage: positive" or prompt.endswith("\nAdvantage: positive"):
+            baked_indicator = 1
+        elif prompt == "Advantage: negative" or prompt.endswith("\nAdvantage: negative"):
+            baked_indicator = 0
+
         if "acp_indicator" in data:
             indicator = int(np.asarray(data.pop("acp_indicator")).reshape(-1)[0])
             if indicator not in (0, 1):
                 raise ValueError(f"acp_indicator must be 0/1, got {indicator}")
+            if baked_indicator is not None:
+                if baked_indicator != indicator:
+                    raise ValueError(
+                        "Baked prompt advantage tag disagrees with acp_indicator: "
+                        f"prompt={baked_indicator}, indicator={indicator}"
+                    )
+                # A baked dataset stores the tag in tasks.parquet. Apply the
+                # same stochastic training dropout by removing that suffix,
+                # instead of appending a second copy of the tag.
+                if self.dropout_prob > 0.0 and np.random.rand() < self.dropout_prob:
+                    suffix = "Advantage: positive" if indicator == 1 else "Advantage: negative"
+                    data["prompt"] = prompt.removesuffix(suffix).removesuffix("\n")
+                return data
             if self.dropout_prob > 0.0 and np.random.rand() < self.dropout_prob:
                 data["prompt"] = prompt  # drop the tag for this sample
                 return data
             tag = "Advantage: positive" if indicator == 1 else "Advantage: negative"
         else:
+            if baked_indicator is not None:
+                return data
             tag = "Advantage: positive"
 
         data["prompt"] = f"{prompt}\n{tag}" if prompt else tag

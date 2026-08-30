@@ -11,7 +11,7 @@ sys.path.insert(0, str(REPO_ROOT / "policy" / "pi05"))
 sys.path.insert(0, str(REPO_ROOT / "policy" / "pi05" / "src"))
 
 from openpi.models import rtc  # noqa: E402
-from rtc_runtime import ChunkScheduler  # noqa: E402
+from rtc_runtime import ChunkScheduler, PhaseChunkSchedule  # noqa: E402
 
 AH = 50  # action horizon of the pi0.5 checkpoint under test
 
@@ -164,3 +164,70 @@ def test_holds_last_action_rather_than_crashing_when_a_chunk_runs_dry():
         sched.action()
         sched.advance()
     assert sched.action()[0] == AH - 1, "should clamp to the last planned action"
+
+
+def test_phase_chunk_schedule_selects_horizons_and_stops_at_boundaries():
+    phases = PhaseChunkSchedule(
+        [
+            {"name": "approach", "start_step": 0, "end_step": 160, "chunk": 10},
+            {"name": "transport", "start_step": 160, "end_step": 240, "chunk": 5},
+            {"name": "align", "start_step": 240, "chunk": 2},
+        ]
+    )
+    assert phases.select(0).name == "approach"
+    assert phases.select(159).step_budget(159) == 1
+    assert phases.select(160).execution_horizon == 5
+    assert phases.select(239).step_budget(239) == 1
+    assert phases.select(240).execution_horizon == 2
+    assert phases.select(999).name == "align"
+
+
+@pytest.mark.parametrize(
+    "value, match",
+    [
+        ([{"name": "late", "start_step": 1, "chunk": 2}], "start at step 0"),
+        (
+            [
+                {"name": "first", "start_step": 0, "end_step": 10, "chunk": 2},
+                {"name": "gap", "start_step": 11, "chunk": 1},
+            ],
+            "contiguous",
+        ),
+        ([{"name": "bad", "start_step": 0, "chunk": 0}], "chunk must be >= 1"),
+    ],
+)
+def test_phase_chunk_schedule_rejects_invalid_ranges(value, match):
+    with pytest.raises(ValueError, match=match):
+        PhaseChunkSchedule(value)
+
+
+def test_scheduler_replans_immediately_when_phase_chunk_changes():
+    phases = PhaseChunkSchedule(
+        [
+            {"name": "coarse", "start_step": 0, "end_step": 4, "chunk": 4},
+            {"name": "medium", "start_step": 4, "end_step": 8, "chunk": 2},
+            {"name": "fine", "start_step": 8, "chunk": 1},
+        ]
+    )
+    sched = ChunkScheduler(action_horizon=AH, execution_horizon=4)
+    launches = []
+    active_phase = None
+    while sched.step_index < 11:
+        phase = phases.select(sched.step_index)
+        sched.set_execution_horizon(phase.execution_horizon)
+        if active_phase is not None and active_phase != phase.name:
+            sched.request_replan()
+        active_phase = phase.name
+        if sched.should_launch():
+            launch = sched.step_index
+            sched.stage(stamped_chunk(launch), launch)
+            if sched.chunk is None:
+                sched.adopt()
+            elif sched.should_adopt():
+                sched.adopt()
+            launches.append(launch)
+        if sched.should_adopt():
+            sched.adopt()
+        assert sched.action()[0] == sched.step_index
+        sched.advance()
+    assert launches == [0, 4, 6, 8, 9, 10]

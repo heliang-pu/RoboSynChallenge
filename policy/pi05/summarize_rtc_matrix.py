@@ -87,8 +87,14 @@ def mcnemar(a, b):
     return a_only, b_only, p
 
 
-def load(run_dir):
-    data = json.loads((run_dir / "results.json").read_text())
+def load(run_dirs):
+    """Merge one or more matrix runs. Shards write disjoint task sets."""
+    data, results = None, []
+    for d in run_dirs:
+        shard = json.loads((d / "results.json").read_text())
+        data = data or shard
+        results.extend(shard["results"])
+    data = dict(data, results=results)
     cells = {}
     for r in data["results"]:
         summary = (r.get("metrics") or {}).get("summary") or parse_log(r["log"]) or {}
@@ -118,12 +124,13 @@ def rate(summary):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("run_dir", type=Path)
+    p.add_argument("run_dir", type=Path, nargs="+", help="one or more shard directories")
     p.add_argument("--out", default="report.md")
     args = p.parse_args()
 
-    run_dir = args.run_dir if args.run_dir.is_absolute() else REPO_ROOT / args.run_dir
-    data, cells = load(run_dir)
+    run_dirs = [d if d.is_absolute() else REPO_ROOT / d for d in args.run_dir]
+    data, cells = load(run_dirs)
+    run_dir = run_dirs[0]
     horizons = data["args"]["horizons"]
     delay = data["args"]["delay"]
 
@@ -131,7 +138,7 @@ def main():
              f"- inference delay `d` = {delay} env steps",
              f"- execution horizons `H` = {horizons}",
              f"- {data['args']['episodes']} episodes per cell, identical seeds across cells",
-             f"- run: `{run_dir.relative_to(REPO_ROOT)}`", ""]
+             "- runs: " + ", ".join(f"`{d.relative_to(REPO_ROOT)}`" for d in run_dirs), ""]
 
     tasks = []
     for (task, _), _ in cells.items():
