@@ -9,6 +9,28 @@
 
 ---
 
+<!-- branch-readme:begin -->
+
+> **分支导航** — 本仓库按主题分支开发，每个分支的说明就在各自 README 的这个位置。
+>
+> [`main`](../../tree/main) 基线 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · **`feat/lila-wam`（当前）** LiLa-WAM 与覆盖度采集 · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练
+
+## 本分支：`feat/lila-wam` — LiLa-WAM 接入与随机化覆盖度采集
+
+基于 [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05)，领先 `main` 最多，是当前的主力开发分支。
+
+- **LiLa-WAM 策略**：上游以 submodule 引入，附 deploy 入口、训练脚本、帧缓存、norm stats 与任务条件预计算（`policy/lila_wam/`，说明见 `docs/tutorials/policy/lila_wam.md`）
+- **随机化覆盖度**：`scripts/analyze_random_coverage.py` 统计官方 random 配置的实际覆盖，`scripts/build_coverage_configs.py` 据此生成 93 组收窄范围的采集配置（分层补匀 + 缺口补采），产物在 `configs/<task>/coverage_*/`
+- **约束随机化**：`randomize_rigid_object_pair_pose_constrained` 按 mesh 半尺寸保证成对物体的最小 xy 间隙；配套 6 个**直接调用生产判定函数**而非另写一份实现的测试
+- **数据流水线**：种子化采集、v3.0→v2.1 转换、多视角质检、官方与自采数据合并（`scripts/`、`launch/`）
+- **DM0.5 海光 DCU**：批大小探测、微调入口、checkpoint 回传与看门狗（`policy/dm05/`）
+
+> 覆盖度配置的生成输入 `report/coverage/` 属本地产物不入库，因此生成的配置一并提交，否则 clone 后无法复现。
+
+---
+
+<!-- branch-readme:end -->
+
 # 目录
 
 - [项目简介](#项目简介)
@@ -96,11 +118,15 @@ workspace/
 
 ```bash
 cd RoboSynChallenge
-uv venv --python 3.11
+uv venv                                       # .python-version 已钉死 3.11
 source .venv/bin/activate
-uv pip install -r requirements.txt            # 精确锁定的仿真依赖(含私有源包)
+uv pip install -r requirements.txt            # 273 个包，全部来自公开 PyPI
 uv pip install -e . --no-deps                 # 本仓库根包
-uv pip install -e ../EmbodiChain --no-deps    # 仿真框架
+uv pip install -e ../EmbodiChain --no-deps            # 仿真框架
+uv pip install -e ../EmbodiChain/embodichain_tasks --no-deps
+
+# 闭源引擎不在 requirements.txt 里，需单独拿 wheel（见 SETUP.md）
+uv pip install dexsim_engine-0.4.3-cp311-*.whl
 ```
 
 装好后可用 `bash launch/check_all_envs.sh` 依次拉起全部任务环境做冒烟检查。
