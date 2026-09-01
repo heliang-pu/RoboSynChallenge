@@ -79,14 +79,53 @@ bash policy/pi05_lerobot/finetune.sh \
     0
 ```
 
-MEM is on by default. `memory_stride` defaults to the dataset's own fps read
-from `meta/info.json`, which reproduces MEM's one-second spacing —
+Visual MEM is on by default. `memory_stride` defaults to the dataset's own fps
+read from `meta/info.json`, which reproduces MEM's one-second spacing —
 RoboSynChallenge data is **25 fps**, not the 30 fps LeRobot's default assumes.
+
+The dataset must be **v3.0**; LeRobot ≥ 0.6 does not read v2.1. This repo keeps
+both (the pipeline writes v3.0 and converts down for openpi), so point this
+script at the v3.0 copy rather than the one `policy/pi05` consumes.
+`finetune.sh` checks and prints the conversion command.
+
+### Visual vs proprioceptive MEM
+
+The two paths are independent, and they are *not* equally cheap to adopt:
+
+- **Visual MEM adds no parameters.** MEM's space-time attention reuses SigLIP's
+  pretrained q/k/v projections, so a `lerobot/pi05_base` finetune starts from
+  fully pretrained weights on this path.
+- **Proprioceptive MEM changes the input contract.** It drops the discretized
+  state out of the prompt (`include_state_in_prompt=not use_proprioceptive_memory`)
+  and routes history through `model.proprio_history_proj`, which does not exist
+  in `lerobot/pi05_base` and starts from a fresh init. On a single-task dataset
+  that is a much larger departure from the pretrained model.
+
+Hence the default: visual on, proprioceptive opt-in
+(`PI05_USE_PROPRIOCEPTIVE_MEMORY=1`).
+
+### What MEM costs at eval
+
+Measured on one RTX 4090 with a real π₀.₅ checkpoint, 3 cameras at 480×640,
+`memory_frames=6 memory_stride=25`, 12 planning cycles:
+
+| | median plan | p90 | worker VRAM |
+|---|---|---|---|
+| MEM off | 148 ms | 156 ms | 9886 MiB |
+| visual MEM | 242 ms | 248 ms | 11046 MiB |
+
+≈1.6× latency and ≈1.2 GB extra VRAM. The latency comes from the vision tower:
+with `memory_temporal_attention_every=4` on PaliGemma's 27-layer SigLIP, the
+past-frame tokens are dropped after layer 24, so 24 of 27 layers run on all 6
+frames while the language backbone is untouched. The VRAM is the inference ring
+buffer — `(memory_frames - 1) * memory_stride + 1` = 126 full-resolution frames
+per camera, kept on device. Shrink either by lowering `memory_stride` or by
+feeding smaller camera images.
 
 | env var | default | meaning |
 |---|---|---|
 | `PI05_USE_VISUAL_MEMORY` | `true` | historical image tokens fused inside SigLIP |
-| `PI05_USE_PROPRIOCEPTIVE_MEMORY` | `true` | one continuous backbone token per historical state |
+| `PI05_USE_PROPRIOCEPTIVE_MEMORY` | `false` | one continuous backbone token per historical state — see below |
 | `PI05_MEMORY_FRAMES` | `6` | observations in the history |
 | `PI05_MEMORY_STRIDE` | dataset fps | spacing in dataset frames |
 | `PI05_BASE_MODEL` | `lerobot/pi05_base` | `--policy.pretrained_path` |
@@ -102,7 +141,7 @@ Extra arguments are forwarded to `lerobot-train` verbatim.
 Turn MEM off for a stock π₀.₅ baseline:
 
 ```bash
-PI05_USE_VISUAL_MEMORY=0 PI05_USE_PROPRIOCEPTIVE_MEMORY=0 \
+PI05_USE_VISUAL_MEMORY=0 \
     bash policy/pi05_lerobot/finetune.sh click_bell <dataset> <output_dir> 0
 ```
 

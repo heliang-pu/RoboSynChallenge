@@ -56,6 +56,18 @@ Training reads a RoboSynChallenge LeRobot dataset straight from
 that still name the state `observation.qpos` and the cameras `<cam>.color` are
 renamed automatically by `finetune.sh`.
 
+The dataset must be **v3.0**: LeRobot ≥ 0.6 does not read v2.1. This repo keeps
+both versions — the collection pipeline writes v3.0 and converts down to v2.1 for
+openpi — so point `finetune.sh` at the v3.0 copy, not the one `policy/pi05`
+consumes. If you only have v2.1:
+
+```bash
+python -m lerobot.scripts.convert_dataset_v21_to_v30 \
+    --repo-id RoboSynChallenge/cobotmagic_Sim_click_bell \
+    --root lerobot_dataset/cobotmagic_Sim_click_bell \
+    --push-to-hub false
+```
+
 π₀.₅ normalizes state and actions with `QUANTILES`, so the dataset stats must
 carry `q01`/`q99`. `finetune.sh` verifies this and prints the fix; run it
 yourself with:
@@ -77,7 +89,18 @@ bash policy/pi05_lerobot/finetune.sh \
     0
 ```
 
-MEM is enabled by default, finetuning from `lerobot/pi05_base`.
+Visual MEM is enabled by default, finetuning from `lerobot/pi05_base`.
+Proprioceptive MEM is opt-in (`PI05_USE_PROPRIOCEPTIVE_MEMORY=1`): visual MEM
+reuses SigLIP's pretrained projections and adds no parameters, whereas the
+proprioceptive path drops the discretized state out of the prompt and introduces
+`proprio_history_proj`, which `lerobot/pi05_base` has no weights for.
+
+MEM is not free. Measured on one RTX 4090 with 3 cameras at 480×640 and
+`memory_frames=6 memory_stride=25`, a planning cycle goes from 148 ms to 242 ms
+(≈1.6×) and the worker holds ≈1.2 GB more VRAM for the 126-frame inference ring
+buffer. Only 24 of SigLIP's 27 layers see the history — past-frame tokens are
+dropped before the language backbone — so the cost is confined to the vision
+tower.
 
 `memory_stride` counts **dataset frames**, and MEM was pre-trained on
 observations one second apart. `finetune.sh` therefore reads the fps from the
@@ -93,7 +116,7 @@ PI05_BATCH_SIZE=32 PI05_STEPS=30000 \
     bash policy/pi05_lerobot/finetune.sh click_bell <dataset> <output_dir> 0
 
 # stock π₀.₅ baseline, no MEM
-PI05_USE_VISUAL_MEMORY=0 PI05_USE_PROPRIOCEPTIVE_MEMORY=0 \
+PI05_USE_VISUAL_MEMORY=0 \
     bash policy/pi05_lerobot/finetune.sh click_bell <dataset> <output_dir> 0
 ```
 

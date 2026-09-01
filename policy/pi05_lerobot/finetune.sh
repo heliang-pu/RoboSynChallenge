@@ -4,9 +4,9 @@
 # bash finetune.sh click_bell lerobot_dataset/cobotmagic_Sim_click_bell \
 #   outputs/train/pi05_mem_click_bell 3 --steps=30000
 #
-# MEM (visual + proprioceptive short-horizon memory) is on by default — it is
-# the reason this adapter tracks upstream main. Turn it off with
-# PI05_USE_VISUAL_MEMORY=0 PI05_USE_PROPRIOCEPTIVE_MEMORY=0 for a stock π₀.₅ run.
+# Visual MEM (short-horizon observation memory) is on by default — it is the
+# reason this adapter tracks upstream main. Proprioceptive MEM is opt-in via
+# PI05_USE_PROPRIOCEPTIVE_MEMORY=1. PI05_USE_VISUAL_MEMORY=0 gives a stock π₀.₅ run.
 #
 # Set PI05_NOHUP=1 to launch in the background and write a log under
 # $LEROBOT_ROOT/outputs/train/logs by default.
@@ -39,7 +39,12 @@ DTYPE="${PI05_DTYPE:-bfloat16}"
 GRADIENT_CHECKPOINTING="${PI05_GRADIENT_CHECKPOINTING:-true}"
 
 USE_VISUAL_MEMORY="${PI05_USE_VISUAL_MEMORY:-true}"
-USE_PROPRIOCEPTIVE_MEMORY="${PI05_USE_PROPRIOCEPTIVE_MEMORY:-true}"
+# Off by default: visual MEM adds no parameters (it reuses SigLIP's pretrained
+# q/k/v), while proprioceptive MEM both drops the discretized state out of the
+# prompt and introduces `proprio_history_proj`, which lerobot/pi05_base has no
+# weights for. On a single-task dataset that is a much bigger departure from the
+# pretrained model, so opt in deliberately.
+USE_PROPRIOCEPTIVE_MEMORY="${PI05_USE_PROPRIOCEPTIVE_MEMORY:-false}"
 MEMORY_FRAMES="${PI05_MEMORY_FRAMES:-6}"
 
 normalize_bool() {
@@ -59,6 +64,18 @@ fi
 
 INFO_JSON="$DATASET_ROOT/meta/info.json"
 STATS_JSON="$DATASET_ROOT/meta/stats.json"
+
+# LeRobot >= 0.6 only reads v3.0 datasets. This repo keeps both: the collection
+# pipeline writes v3.0 and converts down to v2.1 for openpi, so point this script
+# at the v3.0 copy rather than the one policy/pi05 uses.
+CODEBASE_VERSION="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('codebase_version',''))" "$INFO_JSON" 2>/dev/null || echo "")"
+if [[ "$CODEBASE_VERSION" != "v3.0" ]]; then
+    echo "Error: $DATASET_ROOT is codebase_version='${CODEBASE_VERSION:-unknown}'; LeRobot pi0.5 needs v3.0." >&2
+    echo "Use the v3.0 copy of this dataset, or convert it:" >&2
+    echo "  python -m lerobot.scripts.convert_dataset_v21_to_v30 \\" >&2
+    echo "      --repo-id $DATASET_REPO_ID --root $DATASET_ROOT --push-to-hub false" >&2
+    exit 1
+fi
 
 # MEM was pre-trained on observations one second apart, and `memory_stride` is
 # counted in dataset frames, so the stride has to follow the dataset's fps —
@@ -150,7 +167,7 @@ fi
 echo "========================================="
 echo "  LeRobot PI0.5 Finetune"
 echo "  Task:       $TASK_NAME"
-echo "  Dataset:    $DATASET_ROOT (${DATASET_FPS} fps)"
+echo "  Dataset:    $DATASET_ROOT (${DATASET_FPS} fps, $CODEBASE_VERSION)"
 echo "  Repo ID:    $DATASET_REPO_ID"
 echo "  Output:     $OUTPUT_DIR"
 echo "  GPU:        $GPU_ID"
