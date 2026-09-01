@@ -8,7 +8,7 @@
 
 仓库总体约定见 `main` worktree（`../RoboSynChallenge`）的 CLAUDE.md。
 本 worktree **没有自己的 .venv**（软链到 main 的），也依赖 EmbodiChain 本地分支
-`parallel-fixes`（partial-reset 修复 + 规划器 B=1 放行，未合上游）。
+`parallel-fixes-upstream`（= 官方 tag v0.2.4 + 并行修复）（partial-reset 修复 + 规划器 B=1 放行，未合上游）。
 
 ## 本分支改了什么
 

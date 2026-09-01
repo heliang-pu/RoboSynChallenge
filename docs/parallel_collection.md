@@ -66,5 +66,5 @@ episode 的场景与初始状态都等于串行种子化采集在该 seed 下会
   目前只 patch 了同步版），属后续优化。
 - worker 是串行规划：每集多一次单环境 reset+规划（秒级）。规划占比高的任务
   加速比会被摊薄。
-- 依赖 EmbodiChain 本地分支 `parallel-fixes` 的补丁（partial-reset 下的
+- 依赖 EmbodiChain 本地分支 `parallel-fixes-upstream`（= 官方 tag v0.2.4 + 并行修复）的补丁（partial-reset 下的
   events/spatial 修复 + 规划器 B=1 放行），未合上游前不要用官方原版 EmbodiChain 跑。
