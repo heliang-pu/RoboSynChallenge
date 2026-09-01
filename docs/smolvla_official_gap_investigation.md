@@ -12,6 +12,7 @@
 | a100-2（8-31 报告） | 旧 EmbodiChain（79caf6e6 + parallel-fixes） | fast-rt | lerobot 0.6.2 / tf 5.16.1 | 18/104 = 17.3% |
 | 本机 4090 | 旧 EmbodiChain | **hybrid** | 同上 | 20/104 = 19.2% |
 | 本机 4090 | **origin/main 引擎（69deef71）** | hybrid | 同上 | **42/104 = 40.4%** |
+| 本机 4090 | **官方 pin v0.2.4 + 并行修复（parallel-fixes-upstream）** | hybrid | 同上 | **38/104 = 36.5%** |
 | 主办方 | 最新仓库 | RTX（hybrid） | ？ | 48/104 = 46.2% |
 
 逐种子（4090 上游引擎 / 主办方）：833500 6/6、833600 5/10、833700 4/5、833800 5/5、
@@ -54,4 +55,6 @@ worker 只在 `reset` 命令时清 lerobot 的动作队列；`select_action` 只
   的 finally + `flush_cleanup_queue` 写法）。
 - **所有评测必须在 v0.2.4 引擎上跑**（`parallel-fixes-upstream` 分支）；旧引擎（0.2.3 基线）的历史成功率
   （含本仓库 README 里的表）与官方口径不可比。
-- 上表中 40.4% 那行用的是 HEAD(69deef71)+旧 embodichain_tasks 副本；v0.2.4 的复测结果待补。
+- 40.4% 那行用的是 HEAD(69deef71)+旧 embodichain_tasks 副本；v0.2.4（官方 pin）复测 36.5%：
+  833500 5、833600 6、833700 2、833800 6、833900 2、834000 5、834100 7、834200 5（/13）。
+  与主办方 46.2% 的剩余差距在其自述的种子不可复现范围内（同一 seed 组内他们自己也从 4/13 到 10/13）。
