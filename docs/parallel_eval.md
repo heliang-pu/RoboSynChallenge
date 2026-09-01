@@ -115,3 +115,19 @@ python scripts/eval_policy.py --config policy/act/deploy_policy.yml \
 - 依赖的 EmbodiChain 机制：`EnvCfg.num_envs`（`make_env_from_configs` 已透传）、
   partial reset（`options["reset_ids"]`）、camera group 批量渲染、
   `reset(seed)` 的全局播种 + 按 `env_ids` 抽样。
+
+## A100 / 数据中心卡（a100-2 实测，2026-09-01）
+
+- **渲染器必须用 `fast-rt`**（现已默认 `auto`，数据中心卡自动选它）：`hybrid` 在
+  A100 上只有 ~2 step/s——它的光追走 Vulkan RT 扩展，A100 没有 RT core。
+- **`--device cuda` 必须带索引**（现已自动补成 `cuda:<gpu_id>`）：不带索引时
+  gpu_id≠0 直接 `Expected all tensors on the same device: cuda:0 and cuda:N`；
+  gpu_id=0 不报错但只有 3.5 step/s，补上索引后 18 step/s。
+- 单进程单环境（fast-rt，click_bell）：**~18 step/s**，约为 4090 的 1/3。
+- **同卡多进程近乎线性叠加**（cpu 物理、fast-rt）：两进程各 14/18 step/s，
+  一张卡合计 ~32 env-steps/s。跨进程分片（`num_shards`）在 A100 上比单进程
+  `num_envs` 批量更划算。
+- 此前在 `--device cuda`（不带索引）下测得的"A100 批量负扩展"（N=1/2/4 =
+  3.45/2.84/1.67 env-steps/s）是病态路径下的数据，**作废**；`cuda:0` 下的 N 曲线待重测。
+- 多卡机每个进程要同时设 `--gpu_id i` 与 `EMBODICHAIN_RENDER_GPU_ID=i`
+  （Vulkan 不认 `CUDA_VISIBLE_DEVICES`）。

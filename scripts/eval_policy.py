@@ -825,9 +825,15 @@ def make_env_from_configs(config, gym_config_dict, action_config_dict):
     _set_default(gym_config, "num_envs", int(config.get("num_envs", 1)))
     _set_default(gym_config, "device", config.get("device", "cpu"))
     _set_default(gym_config, "headless", bool(config.get("headless", False)))
-    _set_default(gym_config, "renderer", config.get("renderer", "hybrid"))
+    # 渲染器默认跟随 EmbodiChain 的 auto 规则:RTX 卡 -> hybrid(行为不变),
+    # A100/H100 等数据中心卡 -> fast-rt(实测 hybrid 在 A100 上只有 2 step/s)。
+    _set_default(gym_config, "renderer", config.get("renderer", "auto"))
     _set_default(gym_config, "gpu_id", int(config.get("gpu_id", 0)))
     _set_default(gym_config, "arena_space", float(config.get("arena_space", 5.0)))
+    # 不带索引的 "cuda" 在多卡机上会让部分张量落到 cuda:0:gpu_id≠0 时直接
+    # device mismatch 报错,gpu_id=0 时也实测慢 5 倍以上(A100 3.5 vs 18 step/s)。
+    if str(gym_config["device"]) == "cuda":
+        gym_config["device"] = f"cuda:{int(gym_config['gpu_id'])}"
 
     max_env_steps, _, _ = resolve_episode_max_steps(config, gym_config)
     gym_config["max_episode_steps"] = max_env_steps
