@@ -28,11 +28,20 @@ python scripts/eval_policy.py --config policy/act/deploy_policy.yml \
    episode k 拿到的 seed_k 与「单进程串行跑满」时完全一致；
 2. 每个 episode 用 `env.reset(seed=seed_k, options={"reset_ids": [slot]})` 单独播种
    重置自己的槽位。EmbodiChain 的 reset 会 `torch.manual_seed(seed_k)` 后只为这
-   1 个 env 抽随机化样本，RNG 消费模式与单环境相同——**初始场景与单环境同种子
-   逐位一致**（click_bell random 下实测：button 位姿完全相同、robot qpos 差异
-   ≤1e-6，来自 reset 后的物理沉降步）。
+   1 个 env 抽随机化样本，RNG 消费模式与单环境相同——**物体场景与单环境同种子
+   逐位一致**（click_bell random 下实测：button 位姿差 ≤6e-8，cpu/cuda、跨进程
+   均成立）。
 
-已知偏差（不影响初始场景，只影响过程量）：
+已知偏差：
+
+- **机器人初始 qpos 在 slot>0 与单环境同种子不逐位一致**（实测差可达 ~1 rad）。
+  锚点（重置前 qpos）两边一致、随机偏移的种子一致，但 `randomize_robot_eef_pose`
+  的 FK/IK 在部分 `env_ids` 路径下与单环境路径给出不同解（疑为 warp/IK 内核在
+  部分索引下的分支差异，与此前修掉的高级索引 bug 同族，待上游根修）。分布同族、
+  幅度同范围，成功率统计等价；但**逐 seed 复现单集轨迹仍需 `num_envs=1`**。
+  slot 0（每 wave 首个重置的槽位）不受影响。另注意：**首个 wave 必须从 slot 0
+  开始按序重置**——先重置非 0 槽位会触发 `restore_visual_material` 的惰性初始化
+  越界（上游 bug，本实现天然按序，不会踩到）。
 
 - `mode: interval` 的随机化事件（如 `randomize_light` 每 10 步一次）在批量下从
   同一条全局 RNG 流抽样，数值与串行不同但同分布；
