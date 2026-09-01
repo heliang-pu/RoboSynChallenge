@@ -398,6 +398,11 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # 不带索引的 "cuda" 在多卡机上会让部分张量落到 cuda:0(gpu_id≠0 直接
+    # device mismatch;gpu_id=0 也实测慢 5 倍),统一补上索引;规划 worker 同步继承。
+    if str(getattr(args, "device", "")) == "cuda":
+        args.device = f"cuda:{int(getattr(args, 'gpu_id', 0) or 0)}"
+
     if args.replay and not args.replay_trajectory:
         parser.error("--replay requires --replay_trajectory <path>.")
     if args.replay and args.preview:
