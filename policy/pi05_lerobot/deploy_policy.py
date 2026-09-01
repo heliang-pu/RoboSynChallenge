@@ -26,8 +26,21 @@ import torch
 
 from policy.inference_timing import finish_inference, start_inference
 
+POLICY_ROOT = Path(__file__).resolve().parent
 SENSOR_ORDER = ("cam_high", "cam_left_wrist", "cam_right_wrist")
 DEFAULT_IMAGE_KEYS = {f"observation.images.{sensor}": sensor for sensor in SENSOR_ORDER}
+
+
+def default_worker_python() -> str:
+    """Interpreter that runs the policy when nothing is configured explicitly.
+
+    The simulator Python is pinned to 3.11 while LeRobot needs >= 3.12, so this
+    policy's own uv environment (`cd policy/pi05_lerobot && uv sync`) is the
+    normal answer. Falling back to the current interpreter keeps a single-env
+    setup working.
+    """
+    uv_python = POLICY_ROOT / ".venv" / "bin" / "python"
+    return str(uv_python) if uv_python.exists() else sys.executable
 
 
 def _to_numpy(value) -> np.ndarray:
@@ -190,7 +203,7 @@ class Pi05LeRobotClient:
         self.python_bin = (
             usr_args.get("pi05_lerobot_python")
             or os.environ.get("PI05_LEROBOT_PYTHON")
-            or sys.executable
+            or default_worker_python()
         )
         self.device = usr_args.get("pytorch_device", "cuda")
         self.steps = int(usr_args.get("pi05_lerobot_steps", 10))
@@ -305,6 +318,7 @@ class Pi05LeRobotClient:
             else "disabled"
         )
         print(
+            f"[pi05_lerobot] worker={self.python_bin}\n"
             f"[pi05_lerobot] step_mode={self.step_mode} steps={self.steps} "
             f"chunk_size={info['chunk_size']} n_action_steps={info['n_action_steps']} "
             f"MEM({memory}) rescale_gripper={self.rescale_gripper}",

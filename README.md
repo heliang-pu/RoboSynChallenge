@@ -134,8 +134,8 @@ uv pip install dexsim_engine-0.4.3-cp311-*.whl
 
 ## 2. 策略训练环境(按需,进哪个装哪个)
 
-`policy/act`、`policy/dp`、`policy/pi0`、`policy/pi05` 都是**独立 uv 项目**,
-自带 `pyproject.toml` + `uv.lock`(已提交,保证可复现):
+`policy/act`、`policy/dp`、`policy/pi0`、`policy/pi05`、`policy/pi05_lerobot`
+都是**独立 uv 项目**,自带 `pyproject.toml` + `uv.lock`(已提交,保证可复现):
 
 ```bash
 # 方式一:什么都不用装,直接跑训练脚本,首次运行自动按 lock 建环境
@@ -150,6 +150,11 @@ uv sync --extra sim    # 追加仿真评估依赖(需要 EmbodiChain 同级 clon
 > 训练脚本内部用 `uv run --frozen`,严格按仓库自带的 uv.lock 安装,
 > 没有 EmbodiChain 和私有源权限也能正常训练。
 > 若你修改了某个 policy 的 `pyproject.toml`,需在有上述前置条件的机器上重新 `uv lock`。
+
+> `policy/pi05_lerobot` 是唯一没有 `sim` extra 的:上游 lerobot 要 Python >=3.12,
+> 而仿真侧钉死 3.11,两者装不进同一个解释器。它的评估靠跨进程——`eval_policy.py`
+> 在仿真环境里跑,策略本体由 worker 在这个 uv 环境里跑,`eval.sh` 会自动把
+> `policy/pi05_lerobot/.venv/bin/python` 传给 worker。
 
 其余策略(dm05 / g05 / motus / xr1)依赖树庞大且含自编译组件(flash-attn、
 DeepSpeed 等),各自目录下的 `setup_env.sh` 或 README 说明了环境搭建方式。

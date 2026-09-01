@@ -63,6 +63,8 @@ echo "  GPU:        $GPU_ID"
 echo "  Python:     $PYTHON_BIN"
 if [[ -n "${PI05_LEROBOT_PYTHON:-}" ]]; then
     echo "  Worker Py:  $PI05_LEROBOT_PYTHON"
+elif [[ -x "$SCRIPT_DIR/.venv/bin/python" ]]; then
+    echo "  Worker Py:  $SCRIPT_DIR/.venv/bin/python (uv)"
 else
     echo "  Worker Py:  current eval Python"
 fi

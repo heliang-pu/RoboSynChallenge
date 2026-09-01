@@ -47,27 +47,53 @@ checkpoint with 4 env steps per horizon over 3 horizons:
 
 ## Environment setup
 
-Evaluation spans two Python contexts, which may but need not be the same env:
+### Why there are two Python environments
 
-- the EmbodiChain/RoboSynChallenge Python that runs the simulator and
-  `scripts/eval_policy.py`;
-- the worker Python that imports LeRobot and loads the checkpoint.
+The simulator side is pinned to **Python 3.11** (the repo-root `.venv`), while
+LeRobot requires **≥ 3.12** and transformers v5. They cannot coexist in one
+interpreter, and that is not a conflict worth "fixing":
 
-LeRobot requires Python ≥ 3.12 and transformers v5, which the simulator env
-usually cannot satisfy, hence the worker subprocess.
+- `scripts/eval_policy.py` and EmbodiChain run in the simulator Python;
+- `pi05_worker.py` loads `PI05Policy` in this policy's own Python;
+- the two talk over a stdio JSON pipe.
+
+Training only needs the second one.
+
+### The uv environment (default)
+
+This policy carries its own `pyproject.toml` + `uv.lock`, like `policy/act` and
+`policy/dp`:
 
 ```bash
-cd RoboSynChallenge
-bash policy/pi05_lerobot/setup_lerobot.sh          # clones + installs .[pi,training]
-export PI05_LEROBOT_ROOT=$PWD/policy/pi05_lerobot/lerobot
-export PI05_LEROBOT_PYTHON=$(which python)         # only if the worker env differs
+cd policy/pi05_lerobot && uv sync
 ```
 
-`setup_lerobot.sh` pins an upstream commit that is known to contain MEM and
-refuses a revision without `src/lerobot/policies/pi05/memory.py`. Track the
-moving tip with `LEROBOT_REF=main bash policy/pi05_lerobot/setup_lerobot.sh`.
+That is the whole setup. `finetune.sh` runs through
+`uv run --project policy/pi05_lerobot --frozen`, so it also works with nothing
+installed — the first run builds the environment from the lock. `eval.sh` picks
+up `policy/pi05_lerobot/.venv/bin/python` for the worker automatically.
 
-An existing checkout works too — just point `PI05_LEROBOT_ROOT` at it.
+`uv.lock` pins LeRobot to the upstream commit that contains MEM. Changing
+`[tool.uv.sources]` requires `uv lock`, and the new revision must still have
+`src/lerobot/policies/pi05/memory.py`.
+
+### Using an existing LeRobot checkout instead
+
+```bash
+export PI05_LEROBOT_ROOT=/path/to/lerobot        # a checkout, not a venv
+export PI05_LEROBOT_PYTHON=/path/to/env/bin/python
+```
+
+Setting `PI05_LEROBOT_ROOT` (or `PI05_USE_UV=0`) makes `finetune.sh` fall back to
+whatever `lerobot-train` is on `PATH`, which is what a conda setup needs. To
+clone a checkout here instead:
+
+```bash
+bash policy/pi05_lerobot/setup_lerobot.sh        # clones + installs .[pi,training]
+```
+
+It pins the same MEM-capable commit and refuses a revision without `memory.py`;
+`LEROBOT_REF=main` tracks the moving tip.
 
 ## Finetune
 
@@ -221,4 +247,13 @@ python -m lerobot.scripts.augment_dataset_quantile_stats --repo-id <id> --root <
 | `pi05_worker.py` | subprocess that owns LeRobot and the policy; stdio JSON RPC |
 | `deploy_policy.yml` | eval defaults |
 | `eval.sh` / `finetune.sh` | entry points |
-| `setup_lerobot.sh` | clone + install LeRobot at a MEM-capable revision |
+| `pyproject.toml` / `uv.lock` / `.python-version` | this policy's uv environment, LeRobot pinned to the MEM commit |
+| `setup_lerobot.sh` | alternative: clone + install LeRobot at a MEM-capable revision |
+
+Tests live in `tests/test_pi05_lerobot_adapter.py` and need neither a checkpoint
+nor a LeRobot install:
+
+```bash
+env -u PYTHONPATH PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
+    .venv/bin/python -m pytest tests/test_pi05_lerobot_adapter.py -q
+```

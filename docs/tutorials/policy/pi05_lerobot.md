@@ -20,32 +20,49 @@ RoboSynChallenge_ws/
   RoboSynChallenge/
 ```
 
-Evaluation spans two Python contexts:
+This policy needs **two** Python environments, and that is deliberate:
 
-- the EmbodiChain/RoboSynChallenge Python that runs the simulator and
-  `scripts/eval_policy.py`;
-- the worker Python that imports LeRobot and loads the π₀.₅ checkpoint.
+- the simulator side is pinned to Python 3.11 (the repo-root `.venv`) and runs
+  EmbodiChain plus `scripts/eval_policy.py`;
+- LeRobot requires Python ≥ 3.12 and transformers v5, so the π₀.₅ checkpoint is
+  loaded by `pi05_worker.py` in its own environment.
 
-They can be the same environment, but usually are not: LeRobot needs Python
-≥ 3.12 and transformers v5, which the simulator environment often cannot
-satisfy. The adapter therefore runs the policy in a subprocess.
+The two cannot share an interpreter, so the adapter runs the policy in a
+subprocess and talks to it over a stdio JSON pipe. Training only needs the
+second environment.
+
+Like `policy/act` and `policy/dp`, this policy carries its own uv environment:
 
 ```bash
-cd RoboSynChallenge
+cd policy/pi05_lerobot && uv sync
+```
+
+That is the whole setup. `finetune.sh` goes through
+`uv run --project policy/pi05_lerobot --frozen`, so it also works with nothing
+installed — the first run builds the environment from `uv.lock`. `eval.sh` finds
+`policy/pi05_lerobot/.venv/bin/python` on its own and hands it to the worker.
+
+`uv.lock` pins LeRobot to the upstream commit containing MEM. If you edit
+`[tool.uv.sources]`, re-run `uv lock` and make sure the new revision still ships
+`src/lerobot/policies/pi05/memory.py`.
+
+### Using an existing LeRobot checkout
+
+```bash
+export PI05_LEROBOT_ROOT=/path/to/lerobot          # a checkout, not a venv
+export PI05_LEROBOT_PYTHON=/path/to/env/bin/python
+```
+
+`PI05_LEROBOT_ROOT` (or `PI05_USE_UV=0`) makes `finetune.sh` fall back to
+whatever `lerobot-train` is on `PATH` — what a conda-based setup needs. To clone
+a checkout under the policy directory instead:
+
+```bash
 bash policy/pi05_lerobot/setup_lerobot.sh
-export PI05_LEROBOT_ROOT=$PWD/policy/pi05_lerobot/lerobot
-export PI05_LEROBOT_PYTHON=/path/to/lerobot/env/bin/python   # if it differs
+LEROBOT_REF=main bash policy/pi05_lerobot/setup_lerobot.sh   # follow upstream
 ```
 
-`setup_lerobot.sh` pins an upstream commit known to contain MEM, and aborts on a
-revision without `src/lerobot/policies/pi05/memory.py`. To follow upstream:
-
-```bash
-LEROBOT_REF=main bash policy/pi05_lerobot/setup_lerobot.sh
-```
-
-An existing LeRobot checkout works too — point `PI05_LEROBOT_ROOT` at it instead
-of cloning again.
+It pins the same MEM-capable commit and aborts on a revision without `memory.py`.
 
 ## Generate RoboSynChallenge Data
 
