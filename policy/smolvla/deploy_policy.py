@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import numpy as np
@@ -337,10 +338,12 @@ def get_model(usr_args):
 
 
 def eval(env, model, obs):
+    inference_start = time.perf_counter()
     instruction = getattr(env, "_current_instruction", None) or "click the bell"
     encoded_obs = encode_obs(obs, image_keys=model.image_keys)
     actions = model.infer(encoded_obs, task=instruction)
     model.maybe_print_action_debug(actions)
+    inference_time = time.perf_counter() - inference_start
 
     final_obs = obs
     info = {}
@@ -358,7 +361,7 @@ def eval(env, model, obs):
         if bool(_to_numpy(truncated).reshape(-1)[0]):
             break
 
-    return final_obs, info, truncated
+    return final_obs, info, truncated, [inference_time]
 
 
 def reset_model(model):

@@ -103,7 +103,16 @@ def main() -> int:
 
             with contextlib.redirect_stdout(sys.stderr):
                 obs, task = _load_obs(request["obs_path"])
-                obs = {key: torch.from_numpy(value) for key, value in obs.items()}
+                # 仿真侧传来的图像是 uint8。新版 lerobot 的预处理管线会先做
+                # resize(upsample_bilinear2d),该算子不支持 Byte,需先转 float
+                # 并归一到 [0,1](等价于旧版归一化器对 uint8 的处理)。
+                _tensors = {}
+                for key, value in obs.items():
+                    t = torch.from_numpy(value)
+                    if t.dtype == torch.uint8:
+                        t = t.to(torch.float32).div_(255.0)
+                    _tensors[key] = t
+                obs = _tensors
                 obs["task"] = task
                 proc_obs = preprocessor(obs)
 
