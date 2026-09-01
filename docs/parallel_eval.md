@@ -15,6 +15,10 @@ python scripts/eval_policy.py --config policy/act/deploy_policy.yml \
 - **必须 `--device cuda`**。DexSim 在 CPU 设备下对多环境退化成逐 env 的 Python
   循环（`articulation.py` 的 setter 分支），没有并行收益；脚本会给出警告但不阻止。
 - `num_envs=1`（默认）时走原有串行循环，行为与改动前逐字节一致。
+- **N 不是越大越好，先测再定**。本机 4090（click_bell clear + 轻量 ACT、361 步
+  全跑满的最差情形）实测：N=1 → 50 env-steps/s，N=2 → 66，**N=4 → 86（1.7×，
+  甜点）**，N=8 → 53（渲染饱和，3 相机 × 8 env = 24 路 view/步，反而比 N=4 慢）。
+  推理越重的策略批量摊薄越多、甜点可能右移；换卡/换任务先用 1 个 wave 试跑。
 
 ## 种子协议：与串行同一批种子、同一批场景
 
