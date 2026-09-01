@@ -43,8 +43,14 @@ a100-2 `scratch/seed_reinfer10`。
 
 ## 处置
 
-- EmbodiChain 本地分支 `parallel-fixes-upstream` = origin/main(69deef71) + partial-reset 修复 +
-  `EMBODICHAIN_RENDER_GPU_ID` + planner B=1 放行；visual.py 的纹理池补丁被上游更通用的实现覆盖，弃用。
+- **官方引擎版本是 tag `v0.2.4`**（RSC `docs/getting_started/installation.md`：`git checkout tags/v0.2.4`，
+  9ebee300，2026-08-06）。EmbodiChain HEAD 的 #550 重构删掉了 `embodichain_tasks.tableware.base_agent_env`，
+  RSC 全部任务 import 它，**HEAD 不可用**。本地引擎分支 `parallel-fixes-upstream` = v0.2.4 + partial-reset
+  修复 + `EMBODICHAIN_RENDER_GPU_ID` + planner B=1 放行；visual.py 的纹理池补丁被上游更通用的实现覆盖，弃用。
+  旧基线 79caf6e6 → v0.2.4 共 17 个提交（含 #456 Remove default physics arguments、#459 材质生命周期）。
+  v0.2.4 上并行评估/并行采集冒烟均通过；8 种子 drawer 在 v0.2.4 上的确认结果见文末。
 - RSC 两条并行分支已合入 origin/main（tasks/ 重新与官方逐字节一致；`run_env.py` 收尾段取 origin
   的 finally + `flush_cleanup_queue` 写法）。
-- **所有评测必须在最新 origin/main 引擎上跑**；旧引擎的历史成功率（含本仓库 README 里的表）与官方口径不可比。
+- **所有评测必须在 v0.2.4 引擎上跑**（`parallel-fixes-upstream` 分支）；旧引擎（0.2.3 基线）的历史成功率
+  （含本仓库 README 里的表）与官方口径不可比。
+- 上表中 40.4% 那行用的是 HEAD(69deef71)+旧 embodichain_tasks 副本；v0.2.4 的复测结果待补。
