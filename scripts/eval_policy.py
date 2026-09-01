@@ -893,7 +893,10 @@ def main():
             write_rollout_success_sidecar(
                 dataset_dir, config, episode_records, get_saved_episode_count(env)
             )
-        env.close()
+        # 不在这里 env.close():本机 DexSim 栈 close 会直接终止进程(exit 0),
+        # 放在 finally 里会把后面的 summary 打印和 evaluation_metrics.json 全吞掉
+        # (eval_result/ 里长期没有 metrics 文件就是这个原因)。close 挪到 main
+        # 末尾、指标落盘之后;异常路径不 close,进程退出时由 OS 回收。
 
     inference_call_count = len(all_inference_times)
     average_action_steps = float(np.mean(action_steps))
@@ -966,6 +969,14 @@ def main():
     print(f"  Timing platform: {format_platform(platform_metadata)}")
     print(f"  Metrics saved to: {result_path}")
     print(f"{'='*50}")
+
+    # close 可能直接终止进程(见 finally 处注释),必须最后做,且先把 stdout 刷掉。
+    sys.stdout.flush()
+    sys.stderr.flush()
+    try:
+        env.close()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 if __name__ == "__main__":
