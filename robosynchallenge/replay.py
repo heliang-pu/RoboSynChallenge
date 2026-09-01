@@ -25,13 +25,34 @@ import torch
 from tensordict import TensorDict
 
 from embodichain.lab.gym.envs.wrapper import ReplayWrapper
-from embodichain.lab.scripts.run_env import replay as replay_native_trajectory
 from embodichain.lab.scripts.run_env import replay_auto, replay_control
 from embodichain.utils.logger import log_info, log_warning
 
 __all__ = ["convert_state_action_trajectory", "replay_trajectory"]
 
 ReplayMode = Literal["kinematic", "dynamic", "control"]
+
+
+class _TaskStateReplayWrapper(ReplayWrapper):
+    """Advance stateful task predicates during exact kinematic replay."""
+
+    def step(self, action: Any):
+        result = super().step(action)
+        # ReplayWrapper's kinematic path writes poses directly and intentionally
+        # skips env.get_info(), so temporal success flags (lifted, poured,
+        # pressed-after-placement, and stability counters) would otherwise
+        # never see the trajectory. Dynamic replay already evaluates task state
+        # inside env.step().
+        if self._mode == "kinematic":
+            if hasattr(self.env, "_elapsed_steps"):
+                self.env._elapsed_steps.copy_(
+                    self._replay_steps.to(
+                        device=self.env._elapsed_steps.device,
+                        dtype=self.env._elapsed_steps.dtype,
+                    )
+                )
+            self.env.compute_task_state()
+        return result
 
 
 def _as_batched_trajectory(value: Any, key: str) -> torch.Tensor:
@@ -235,35 +256,54 @@ def replay_trajectory(
     env: Any,
     trajectory_path: str | PathLike[str],
     mode: ReplayMode = "kinematic",
-) -> None:
+) -> torch.Tensor:
     """Replay a native EmbodiChain or legacy RoboSynChallenge trajectory."""
     data = torch.load(trajectory_path, map_location="cpu", weights_only=False)
     if not isinstance(data, dict):
         raise ValueError(f"Trajectory root must be a dict, got {type(data).__name__}.")
 
     if {"states", "actions", "meta"}.issubset(data):
-        replay_native_trajectory(env, str(trajectory_path), mode=mode)
-        return
-
-    converted = convert_state_action_trajectory(data, env.unwrapped, mode=mode)
-    meta = converted["meta"]
-    log_info(
-        f"Replaying legacy state/action trajectory: num_envs={meta['num_envs']}, "
-        f"num_steps={meta['num_steps']}, mode={mode}",
-        color="green",
-    )
-    if mode in ("kinematic", "control"):
-        log_warning(
-            "This legacy file has no drawer or rigid-object states; kinematic replay "
-            "reproduces robot motion only. Use --replay_mode dynamic to re-simulate "
-            "object interaction from the recorded actions."
+        meta = data["meta"]
+        lengths = meta.get(
+            "lengths", [meta["num_steps"]] * meta["num_envs"]
         )
+        log_info(
+            f"Replaying trajectory: num_envs={meta['num_envs']}, "
+            f"lengths={lengths}, num_steps={meta['num_steps']}, mode={mode}",
+            color="green",
+        )
+        replay_data = data
+    else:
+        replay_data = convert_state_action_trajectory(
+            data, env.unwrapped, mode=mode
+        )
+        meta = replay_data["meta"]
+        log_info(
+            f"Replaying legacy state/action trajectory: num_envs={meta['num_envs']}, "
+            f"num_steps={meta['num_steps']}, mode={mode}",
+            color="green",
+        )
+        if mode in ("kinematic", "control"):
+            log_warning(
+                "This legacy file has no drawer or rigid-object states; kinematic replay "
+                "reproduces robot motion only. Use --replay_mode dynamic to re-simulate "
+                "object interaction from the recorded actions."
+            )
 
-    replay_env = ReplayWrapper(env.unwrapped, converted, mode=mode)
+    # Keep the wrapper alive until after success is evaluated: ReplayWrapper.close
+    # closes the underlying simulator, so reporting after the native replay helper
+    # returns would access a closed environment.
+    replay_env = _TaskStateReplayWrapper(env.unwrapped, replay_data, mode=mode)
     try:
         if mode == "control":
             replay_control(replay_env)
         else:
             replay_auto(replay_env, mode)
+        success = env.unwrapped.is_task_success().detach().to(device="cpu")
+        log_info(
+            f"Success condition after replay: {success.tolist()}",
+            color="green" if bool(success.all()) else "yellow",
+        )
     finally:
         replay_env.close()
+    return success

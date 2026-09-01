@@ -13,13 +13,39 @@
 
 > **分支导航** — 本仓库按主题分支开发，每个分支的说明就在各自 README 的这个位置。
 >
-> **`main`（当前）** 基线 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · [`feat/lila-wam`](../../tree/feat/lila-wam) LiLa-WAM 与覆盖度采集 · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练
+> **`main`（当前）** 基线 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · [`feat/lila-wam`](../../tree/feat/lila-wam) / [`feat/lerobot-pi05-mem`](../../tree/feat/lerobot-pi05-mem) LiLa-WAM、覆盖度采集与 LeRobot pi0.5 MEM · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练
 
 ## 本分支：`main` — 基线
 
-与主办方上游 `EDEM-AI/RoboSynChallenge` 保持同步的基线，只放所有实验分支共用的东西：完整的中文项目说明、按需安装的 uv 训练环境、10 个任务的采集/训练/评估流程，以及**回退到官方口径的成功判定**（本地改过的判定已全部撤回，避免与排行榜对不上）。
+与主办方上游 `EDEM-AI/RoboSynChallenge` 保持同步的基线，放所有实验分支共用的东西：完整的中文项目说明、按需安装的 uv 训练环境、10 个任务的采集/训练/评估流程，以及**回退到官方口径的成功判定**（本地改过的判定已全部撤回，避免与排行榜对不上）。
 
-功能开发不在这里做，各自在下面的主题分支上。上游有更新时先合到本分支，再由各分支合过去。
+功能开发在下面的主题分支上做。上游有更新时先合到本分支，再由各分支合过去；主题分支做完也可以合回本分支。
+
+`feat/lila-wam` / `feat/lerobot-pi05-mem` 的工作已并入，内容如下。
+
+### LiLa-WAM 接入与随机化覆盖度采集
+
+- **LiLa-WAM 策略**：上游以 submodule 引入，附 deploy 入口、训练脚本、帧缓存、norm stats 与任务条件预计算（`policy/lila_wam/`，说明见 `docs/tutorials/policy/lila_wam.md`）
+- **随机化覆盖度**：`scripts/analyze_random_coverage.py` 统计官方 random 配置的实际覆盖，`scripts/build_coverage_configs.py` 据此生成 93 组收窄范围的采集配置（分层补匀 + 缺口补采），产物在 `configs/<task>/coverage_*/`
+- **约束随机化**：`randomize_rigid_object_pair_pose_constrained` 按 mesh 半尺寸保证成对物体的最小 xy 间隙；配套 6 个**直接调用生产判定函数**而非另写一份实现的测试
+- **数据流水线**：种子化采集、v3.0→v2.1 转换、多视角质检、官方与自采数据合并（`scripts/`、`launch/`）
+- **DM0.5 海光 DCU**：批大小探测、微调入口、checkpoint 回传与看门狗（`policy/dm05/`）
+
+> 覆盖度配置的生成输入 `report/coverage/` 属本地产物不入库，因此生成的配置一并提交，否则 clone 后无法复现。
+
+### LeRobot pi0.5（PyTorch）与 MEM 观测记忆
+
+把 HuggingFace LeRobot 的 pi0.5 PyTorch 实现接成第二套 pi0.5 集成（`policy/pi05_lerobot/`），
+与既有的 openpi/JAX 版 `policy/pi05` 并存，可在同一任务同一 setting 下直接对比。
+
+- **跟最新上游**：锁定含 MEM 的 upstream commit（huggingface/lerobot#4076，短时程视觉与本体观测记忆），`setup_lerobot.sh` 会拒绝没有 `policies/pi05/memory.py` 的版本
+- **MEM 决定执行节奏**：MEM 的历史环形缓冲每次策略调用只入队一帧，只有「每个环境步喂一次」才与训练一致。因此 eval 有 `per_step` / `chunk` 两种模式，带 MEM 的 checkpoint 默认走 `per_step`（实测 12 个环境步：`per_step` 喂满 12 帧，`chunk` 只喂 3 帧）
+- **stride 跟数据集帧率**：`memory_stride` 以数据集帧计，本仓库数据 25fps 而上游默认 30，`finetune.sh` 直接从 `meta/info.json` 读 fps
+- **独立 uv 环境 + worker 进程**：LeRobot 要求 Python ≥3.12 与 transformers v5，仿真侧钉死 3.11，装不进同一解释器；策略跑在自己的 uv 环境里，经 stdio JSON 与 `eval_policy.py` 通信
+- **老 checkpoint 迁移**：过期 config 字段与写死的 tokenizer 路径这两类坑有现成解法，见策略 README
+
+> 说明见 `policy/pi05_lerobot/README.md` 与 `docs/tutorials/policy/pi05_lerobot.md`。
+
 
 ---
 
@@ -48,7 +74,8 @@ RoboSynChallenge 是基于 [EmbodiChain](https://dexforce.github.io/EmbodiChain/
 
 - **10 个双臂操作任务**的仿真环境与专家轨迹生成器(按低/中/高三档难度分级);
 - **数据采集流水线**:专家演示 → LeRobot 数据集(v3.0/v2.1)→ 多重校验门 → 训练就绪;
-- **8 个策略的训练/部署集成**:ACT、Diffusion Policy、pi0、pi0.5、DM0.5、G0.5、Motus、XR-1,
+- **10 个策略的训练/部署集成**:ACT、Diffusion Policy、pi0、pi0.5(openpi/JAX 与 LeRobot/torch 各一套)、
+  DM0.5、G0.5、Motus、XR-1、LiLa-WAM,
   统一评估接口,任何策略实现 `deploy_policy.py` 即可接入;
 - **标准化评估协议**:clear / random / random_3p 三种设置,固定判据与随机种子,结果可复现。
 
@@ -69,7 +96,9 @@ RoboSynChallenge/
 │   ├── act/  dp/         #   LeRobot 栈(uv 项目)
 │   ├── pi0/  pi05/       #   openpi JAX 栈(uv 项目)
 │   ├── dm05/ g05/ motus/ xr1/   # 各自的环境搭建脚本
+│   ├── lila_wam/         #   LiLa-WAM(直接吃 LeRobot v2.1 训练)
 │   └── Your_Policy/      #   接入自定义策略的模板
+├── third_party/          # 收编的外部依赖(evo_rl:sim-RECAP 价值函数栈)
 ├── lerobot_dataset/      # 本地采集的数据默认落在这里
 ├── evaluation_results/   # 已发布 ACT/DP checkpoint 的百集评估结果(机器可读)
 ├── report/               # pi0.5 官方协议评估报告(random×100)
@@ -125,8 +154,8 @@ uv pip install dexsim_engine-0.4.3-cp311-*.whl
 
 ## 2. 策略训练环境(按需,进哪个装哪个)
 
-`policy/act`、`policy/dp`、`policy/pi0`、`policy/pi05` 都是**独立 uv 项目**,
-自带 `pyproject.toml` + `uv.lock`(已提交,保证可复现):
+`policy/act`、`policy/dp`、`policy/pi0`、`policy/pi05`、`policy/pi05_lerobot`
+都是**独立 uv 项目**,自带 `pyproject.toml` + `uv.lock`(已提交,保证可复现):
 
 ```bash
 # 方式一:什么都不用装,直接跑训练脚本,首次运行自动按 lock 建环境
@@ -141,6 +170,11 @@ uv sync --extra sim    # 追加仿真评估依赖(需要 EmbodiChain 同级 clon
 > 训练脚本内部用 `uv run --frozen`,严格按仓库自带的 uv.lock 安装,
 > 没有 EmbodiChain 和私有源权限也能正常训练。
 > 若你修改了某个 policy 的 `pyproject.toml`,需在有上述前置条件的机器上重新 `uv lock`。
+
+> `policy/pi05_lerobot` 是唯一没有 `sim` extra 的:上游 lerobot 要 Python >=3.12,
+> 而仿真侧钉死 3.11,两者装不进同一个解释器。它的评估靠跨进程——`eval_policy.py`
+> 在仿真环境里跑,策略本体由 worker 在这个 uv 环境里跑,`eval.sh` 会自动把
+> `policy/pi05_lerobot/.venv/bin/python` 传给 worker。
 
 其余策略(dm05 / g05 / motus / xr1)依赖树庞大且含自编译组件(flash-attn、
 DeepSpeed 等),各自目录下的 `setup_env.sh` 或 README 说明了环境搭建方式。
@@ -289,10 +323,12 @@ cd policy/dm05 && bash eval.sh <task_name> <setting> ...
 | Diffusion Policy | 扩散策略 | LeRobot / torch | ~10 GB | uv(policy/dp) |
 | pi0 | VLA(PaliGemma 3B + action expert) | openpi / JAX | 全量 ~80 GB,可调小 batch | uv(policy/pi0) |
 | pi0.5 | VLA(pi0 升级版,开放世界泛化) | openpi / JAX | 全量 ~80 GB,可调小 batch | uv(policy/pi05) |
+| pi0.5 (LeRobot) | 同上的 PyTorch 移植,带 MEM 观测记忆 | LeRobot / torch | 单卡 48 GB(bf16 + 梯度检查点) | 独立 Python(见 policy/pi05_lerobot) |
 | DM0.5 | VLA(服务式推理) | OpenDM / torch | 多卡 SFT | conda(见 policy/dm05) |
 | G0.5 | VLA(2B VLM + action expert) | GalaxeaVLA / torch | >70 GB/卡,官方 8 卡 | venv(见 policy/g05) |
 | Motus | VLA(视频生成先验) | Motus / DeepSpeed | >80 GB/卡 | venv(见 policy/motus) |
 | XR-1 | VLA(5.5B) | Xiaomi-Robotics / torch | 冻结 VLM 可单卡 48 GB | venv(见 policy/xr1) |
+| LiLa-WAM | 世界-动作模型(冻结 DINOv3 + 0.2B DiT) | LiLa-WAM / torch | 单卡 24 GB | venv(见 policy/lila_wam) |
 
 # 评估结果
 
@@ -330,5 +366,6 @@ cd policy/dm05 && bash eval.sh <task_name> <setting> ...
 | [docs/tutorials/domain_randomization.md](docs/tutorials/domain_randomization.md) | 域随机化机制 |
 | [docs/tutorials/configuration.md](docs/tutorials/configuration.md) | 配置文件字段说明 |
 | [docs/tutorials/policy/](docs/tutorials/policy/) | 各策略训练/评估教程 |
+| [docs/tutorials/sim_recap.md](docs/tutorials/sim_recap.md) | sim-RECAP:无人在回路的优势条件化迭代训练(价值函数 + ACP) |
 | [launch/README.md](launch/README.md) | 采集/回放/可视化脚本手册 |
 | [scripts/README.md](scripts/README.md) | 数据集工具手册 |

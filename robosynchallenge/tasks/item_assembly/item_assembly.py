@@ -91,7 +91,7 @@ class ItemAssemblyEnv(EmbodiedEnv):
             logger.log_warning("Failed to generate expert demo action list.")
             return None
 
-        # self._schedule_guijiao_attach_after_edge("L_splice_to_align")
+        self._schedule_guijiao_attach_after_edge("L_splice_to_align")
 
         # TODO: to be removed, need a unified interface in robot class
         left_arm_joints = self.robot.get_joint_ids(name="left_arm", remove_mimic=True)
@@ -164,17 +164,33 @@ class ItemAssemblyEnv(EmbodiedEnv):
         if current_step < trigger_step:
             return
 
-        ItemAssemblyActionBank.attach_rigid_objects_now(
-            self,
-            parent_uid="guijiao1",
-            child_uid="guijiao2",
-            set_kinematic=True,
+        before = self.is_task_success()
+        logger.log_info(
+            f"Assembly alignment metrics: {self._last_success_metrics}; "
+            f"success={before.detach().cpu().tolist()}"
         )
+        env_ids = torch.arange(self.num_envs, device=self.device)
+        self.event_manager.apply(mode="attach_guijiao", env_ids=env_ids)
+        logger.log_info("Created guijiao fixed constraint at aligned pose.")
         self._guijiao_attached = True
 
-    # def step(self, action, **kwargs):
-    #     self._run_guijiao_attach_if_ready()
-    #     return super().step(action, **kwargs)
+    def step(self, action, **kwargs):
+        self._run_guijiao_attach_if_ready()
+        return super().step(action, **kwargs)
+
+    def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
+        # Remove the prior episode's weld before objects are randomized.  The
+        # event is idempotent in the simulation layer.
+        if hasattr(self, "event_manager"):
+            try:
+                env_ids = torch.arange(self.num_envs, device=self.device)
+                self.event_manager.apply(mode="detach_guijiao", env_ids=env_ids)
+            except Exception:
+                pass
+        self._guijiao_attached = False
+        self._guijiao_attach_step = None
+        self._guijiao_attach_schedule_checked = False
+        return super().reset(seed=seed, options=options)
 
     
     def is_task_success(self, **kwargs) -> torch.Tensor:
@@ -243,6 +259,9 @@ class ItemAssemblyEnv(EmbodiedEnv):
         # Contact-sensor based proximity check (prefer contact data when available)
         # Only contacts between guijiao1 and guijiao2 are considered valid for docking
         contact_ok = torch.ones(num_envs, dtype=torch.bool, device=device)
+        contact_min_dist = torch.full(
+            (num_envs,), float("inf"), dtype=guijiao1_pose.dtype, device=device
+        )
         try:
             sensor = self.sim.get_sensor("guijiao_contact")
         except Exception:
@@ -279,6 +298,7 @@ class ItemAssemblyEnv(EmbodiedEnv):
                     masked[effective_mask] = distances[effective_mask]
                     # min distance per env
                     min_dist_per_env = masked.min(dim=1)[0]
+                    contact_min_dist = min_dist_per_env
                     contact_ok = min_dist_per_env <= 0.003
                 else:
                     # cannot find guijiao objects; fallback to previous permissive behavior
@@ -314,6 +334,23 @@ class ItemAssemblyEnv(EmbodiedEnv):
         lateral_ok = lateral_offset <= lateral_tol
 
         success_mask = angle_ok & valid_pose_mask & step_mask & contact_ok & lateral_ok
+        # Read-only diagnostics consumed by scripts/run_env.py when
+        # --report_task_success is enabled.  Keep the predicate above exactly
+        # unchanged while making systematic zero-yield runs debuggable.
+        self._last_success_metrics = {
+            "angle_deg": torch.rad2deg(angle).detach(),
+            "angle_ok": angle_ok.detach(),
+            "valid_pose_mask": valid_pose_mask.detach(),
+            "step_mask": step_mask.detach(),
+            "contact_ok": contact_ok.detach(),
+            "contact_min_dist": contact_min_dist.detach(),
+            "center_diff": diff.detach(),
+            "axial_projection": proj_len.squeeze(-1).detach(),
+            "lateral_offset": lateral_offset.detach(),
+            "lateral_tol": torch.full_like(lateral_offset, float(lateral_tol.item())),
+            "lateral_ok": lateral_ok.detach(),
+            "success": success_mask.detach(),
+        }
         return success_mask
 
 

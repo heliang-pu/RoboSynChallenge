@@ -1,0 +1,11 @@
+[Unit]
+Description=Retry fmc3-1 RoboSyn collector after external GPU protection releases
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=5min
+Unit=robosyn-seeded.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

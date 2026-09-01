@@ -19,6 +19,8 @@ def parse_args():
     parser.add_argument("--include-first-overlay", action="store_true"); parser.add_argument("--foreground-uids", nargs="*")
     for name, default in (("num_envs", 1), ("arena_space", 5.0), ("gpu_id", 0)): parser.add_argument(f"--{name}", type=type(default), default=default)
     parser.add_argument("--device", default="cpu"); parser.add_argument("--enable_rt", action="store_true")
+    parser.add_argument("--renderer", default=None)
+    parser.add_argument("--max_episodes", type=int, default=None)
     parser.add_argument("--headless", dest="headless", action="store_true", default=True); parser.add_argument("--no-headless", dest="headless", action="store_false")
     return parser.parse_args()
 
@@ -42,7 +44,6 @@ def make_env(opt):
     import robosynchallenge, gymnasium as gym  # noqa: F401
     import embodichain.lab.gym.utils.gym_utils as gym_utils
     from embodichain.lab.gym.utils.gym_utils import config_to_cfg, merge_args_with_gym_config
-    from embodichain.lab.sim import SimulationManagerCfg
 
     for suffix in ("actions", "datasets", "events", "observations"):
         module = f"robosynchallenge.managers.{suffix}"
@@ -58,7 +59,10 @@ def make_env(opt):
     merged = merge_args_with_gym_config(opt, config); env_cfg = config_to_cfg(merged)
 
     env_cfg.filter_visual_rand = True; env_cfg.filter_dataset_saving = True
-    env_cfg.sim_cfg = SimulationManagerCfg(headless=merged["headless"], sim_device=merged["device"], enable_rt=merged["enable_rt"], gpu_id=merged["gpu_id"], arena_space=merged["arena_space"])
+    env_cfg.sim_cfg.headless = merged["headless"]
+    env_cfg.sim_cfg.sim_device = merged["device"]
+    env_cfg.sim_cfg.gpu_id = merged["gpu_id"]
+    env_cfg.sim_cfg.arena_space = merged["arena_space"]
     return gym.make(id=merged["id"], cfg=env_cfg, action_config=read_json(opt.action_config)), raw
 
 def as_numpy(value):

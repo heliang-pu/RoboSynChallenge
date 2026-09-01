@@ -106,8 +106,19 @@ def _as_int_or_none(value):
 def select_cuda_device(config):
     """Align an unqualified policy CUDA device with the simulator GPU."""
     pytorch_device = str(config.get("pytorch_device", ""))
+    gpu_id = int(config.get("gpu_id", 0))
     if pytorch_device.startswith("cuda") and torch.cuda.is_available():
-        torch.cuda.set_device(int(config.get("gpu_id", 0)))
+        torch.cuda.set_device(gpu_id)
+    # JAX 权重默认落在 jax.devices()[0]。当仿真被指到非 0 号物理卡时(多卡机上
+    # 0 号卡常被别的进程占满),权重必须跟着 gpu_id 走,否则 device_put 会 OOM。
+    try:
+        import jax
+
+        _devs = jax.devices()
+        if 0 <= gpu_id < len(_devs):
+            jax.config.update("jax_default_device", _devs[gpu_id])
+    except Exception:  # JAX 不可用或后端未初始化时静默跳过
+        pass
 
 
 def resolve_episode_max_steps(config, gym_config):
@@ -116,6 +127,165 @@ def resolve_episode_max_steps(config, gym_config):
     gym_max_steps = _as_int_or_none(gym_config.get("max_episode_steps"))
     max_env_steps = gym_max_steps or deploy_max_steps or 300
     return max_env_steps, deploy_max_steps, gym_max_steps
+
+
+def configure_rollout_saving(config, gym_config):
+    """Enable rollout dataset saving for sim-RECAP data collection.
+
+    Mutates ``gym_config`` in place (before make_env deep-copies it):
+      * redirects the dataset functor save_path away from the expert dataset
+        directory so rollouts never pollute demonstration data;
+      * sets ``save_failed_episodes=True`` so failed rollouts are kept (they
+        are the negative examples advantage conditioning needs);
+      * flips ``filter_dataset_saving`` to False so the dataset manager runs.
+
+    Returns the resolved rollout dataset directory, or None when disabled
+    (``rollout_save`` unset/false keeps evaluation behavior unchanged).
+    """
+    if not config.get("rollout_save"):
+        return None
+
+    dataset_cfgs = gym_config.get("env", {}).get("dataset", {})
+    functor_names = [
+        name
+        for name, functor_cfg in dataset_cfgs.items()
+        if isinstance(functor_cfg, dict) and "func" in functor_cfg
+    ]
+    if not functor_names:
+        print("Error: rollout_save=true but gym_config has no dataset functor")
+        sys.exit(1)
+
+    save_dir = config.get("rollout_save_path")
+    if not save_dir:
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        save_dir = (
+            f"lerobot_dataset/rollouts/"
+            f"{config.get('task_name')}_{config.get('setting')}_{stamp}"
+        )
+
+    for name in functor_names:
+        dataset_cfgs[name]["save_failed_episodes"] = True
+        params = dict(dataset_cfgs[name].get("params", {}))
+        params["save_path"] = str(save_dir)
+        dataset_cfgs[name]["params"] = params
+
+    config["filter_dataset_saving"] = False
+
+    # Resolve the same way LeRobotRecorder does (relative to the repo root).
+    from robosynchallenge.data.constants import ROBOSYNCHALLENGE_ROOT
+
+    resolved = Path(save_dir)
+    if not resolved.is_absolute():
+        resolved = Path(ROBOSYNCHALLENGE_ROOT) / save_dir
+    print(f"Rollout saving enabled -> {resolved} (failed episodes kept)")
+    return resolved
+
+
+def get_recorder_dataset_dir(env):
+    """Actual dataset directory created by the LeRobot recorder.
+
+    The recorder nests an auto-named ``<robot>_<scene>_<task>_NNN`` directory
+    under the configured save_path, so the sidecar must be written there, not
+    at the save_path root.
+    """
+    dataset_manager = getattr(getattr(env, "unwrapped", env), "dataset_manager", None)
+    if dataset_manager is None:
+        return None
+    for mode_cfgs in getattr(dataset_manager, "_mode_functor_cfgs", {}).values():
+        for functor_cfg in mode_cfgs:
+            functor = getattr(functor_cfg, "func", None)
+            full_path = getattr(functor, "dataset_full_path", None)
+            if full_path:
+                return Path(full_path)
+    return None
+
+
+def get_saved_episode_count(env):
+    """Best-effort count of episodes the LeRobot recorder has written."""
+    dataset_manager = getattr(getattr(env, "unwrapped", env), "dataset_manager", None)
+    if dataset_manager is None:
+        return None
+
+    episode_counts = []
+    for mode_cfgs in getattr(dataset_manager, "_mode_functor_cfgs", {}).values():
+        for functor_cfg in mode_cfgs:
+            functor = getattr(functor_cfg, "func", None)
+            if hasattr(functor, "curr_episode"):
+                episode_counts.append(int(functor.curr_episode))
+    return max(episode_counts) if episode_counts else None
+
+
+def summarize_task_metrics(info):
+    """Flatten ``info['metrics']`` (env 0) into plain Python scalars/lists.
+
+    ``compute_task_state`` returns per-env tensors; for post-mortem debugging of
+    a failed episode we only care about the single env this script drives.
+    """
+    if not isinstance(info, dict):
+        return None
+    metrics = info.get("metrics")
+    if not metrics:
+        return None
+
+    summary = {}
+    for key, value in metrics.items():
+        try:
+            if isinstance(value, torch.Tensor):
+                value = value[0] if value.ndim > 0 else value
+                summary[key] = value.tolist()
+            elif isinstance(value, (bool, int, float)):
+                summary[key] = value
+            elif isinstance(value, np.ndarray):
+                summary[key] = np.asarray(value).reshape(-1).tolist()
+        except Exception:  # noqa: BLE001 - diagnostics must never break eval
+            continue
+    return summary or None
+
+
+def format_task_metrics(summary):
+    parts = []
+    for key, value in summary.items():
+        if isinstance(value, list):
+            parts.append(f"{key}=[" + ", ".join(f"{v:.4f}" for v in value) + "]")
+        elif isinstance(value, bool):
+            parts.append(f"{key}={value}")
+        elif isinstance(value, float):
+            parts.append(f"{key}={value:.4f}")
+        else:
+            parts.append(f"{key}={value}")
+    return "  ".join(parts)
+
+
+def write_rollout_success_sidecar(dataset_dir, config, episode_records, saved_count):
+    """Persist per-episode success labels next to the rollout dataset.
+
+    The sidecar is consumed by scripts/label_rollout_dataset.py, which writes
+    ``episode_success`` ("success"/"failure") into the LeRobot episodes
+    metadata in the format Evo-RL's value training expects.
+    """
+    sidecar = {
+        "task_name": config.get("task_name"),
+        "setting": config.get("setting"),
+        "policy_name": config.get("policy_name"),
+        "train_config_name": config.get("train_config_name"),
+        "model_name": config.get("model_name"),
+        "seed": config.get("seed"),
+        "labels_field": "episode_success",
+        "saved_episode_count": saved_count,
+        "episodes": episode_records,
+    }
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    sidecar_path = dataset_dir / "episode_success.json"
+    with open(sidecar_path, "w") as f:
+        json.dump(sidecar, f, indent=2)
+
+    if saved_count is not None and saved_count != len(episode_records):
+        print(
+            f"Warning: recorder saved {saved_count} episodes but "
+            f"{len(episode_records)} were labeled; "
+            "label_rollout_dataset.py will refuse this dataset."
+        )
+    print(f"Episode success labels written: {sidecar_path}")
 
 
 class EpisodeVideoRecorder:
@@ -552,6 +722,10 @@ def main():
         config, gym_config_dict
     )
 
+    # Optionally record rollouts (with success labels) for sim-RECAP training.
+    # Must run before make_env_from_configs, which deep-copies gym_config_dict.
+    rollout_dir = configure_rollout_saving(config, gym_config_dict)
+
     # Build environment
     env_id = gym_config_dict.get("id")
     print(f"Creating environment: {env_id}")
@@ -581,6 +755,8 @@ def main():
     platform_metadata = collect_platform_metadata()
     rng = np.random.RandomState(seed)
     success_count = 0
+    episode_records = []
+    loop_completed = False
     action_steps = []
     all_inference_times = []
     episode_inference_totals = []
@@ -622,9 +798,9 @@ def main():
                 )
 
                 while env_steps < max_env_steps:
-                    # Upstream's timing change made eval return a 4-tuple,
+                    # Upstream's timing change made ``eval`` return a 4-tuple,
                     # but adapters that predate it (including upstream's own
-                    # smolvla) still return (obs, info, truncated).  Accept
+                    # smolvla) still return ``(obs, info, truncated)``.  Accept
                     # both so an untimed adapter degrades instead of crashing.
                     eval_result = policy_pkg.eval(eval_env, model, obs)
                     if len(eval_result) == 4:
@@ -670,11 +846,43 @@ def main():
                 f"{episode_average:.6f}s "
                 f"over {len(inference_times)} calls"
             )
-            print(f"  [{episode+1:3d}/{max_episodes}] success rate: "
-                  f"{success_count}/{episode+1} = {100*success_count/(episode+1):.1f}%")
+            print(f"  [{episode+1:3d}/{max_episodes}] {status}  "
+                  f"(success rate: {success_count}/{episode+1} = {100*success_count/(episode+1):.1f}%)")
+
+            episode_metrics = summarize_task_metrics(locals().get("info"))
+            if episode_metrics:
+                print(f"  metrics: {format_task_metrics(episode_metrics)}")
+
+            if rollout_dir is not None:
+                episode_records.append(
+                    {
+                        "episode_index": len(episode_records),
+                        "seed": ep_seed,
+                        "success": bool(episode_success),
+                        "env_steps": int(env_steps),
+                        "metrics": episode_metrics,
+                    }
+                )
+        loop_completed = True
     finally:
         if video_recorder:
             video_recorder.close_episode(success=False)
+        if rollout_dir is not None:
+            # The recorder writes an episode on the *next* reset, so the final
+            # episode is still buffered here. One extra reset flushes it; if
+            # the loop crashed mid-episode the buffer holds an unlabeled
+            # partial episode instead, which we discard (save_data=False) to
+            # keep dataset episodes aligned with the success sidecar.
+            try:
+                env.reset(options={"save_data": loop_completed})
+            except Exception as flush_err:  # noqa: BLE001
+                print(f"Warning: rollout flush reset failed: {flush_err}")
+            # 记录器会在 save_path 下再建 <robot>_<scene>_<task>_NNN 子目录,
+            # 边车必须写进真正的数据集目录。
+            dataset_dir = get_recorder_dataset_dir(env) or rollout_dir
+            write_rollout_success_sidecar(
+                dataset_dir, config, episode_records, get_saved_episode_count(env)
+            )
         env.close()
 
     inference_call_count = len(all_inference_times)

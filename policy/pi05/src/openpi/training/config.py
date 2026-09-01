@@ -1,6 +1,7 @@
 """See _CONFIGS for the list of available configs."""
 
 import abc
+import os
 from collections.abc import Sequence
 import dataclasses
 import difflib
@@ -393,6 +394,12 @@ class LeRobotEmbodiChainDataConfig(DataConfigFactory):
 
     extra_delta_transform: bool = False
     action_sequence_keys: Sequence[str] = ("action",)
+    # sim-RECAP / ACP(优势条件化):指向 value-infer 写回的 0/1 indicator 列,
+    # 例如 "complementary_info.acp_indicator_round1"。设置后训练时把
+    # "Advantage: positive/negative" 追加进 prompt(带 dropout),推理时自动
+    # 追加 positive 标签;为 None 时行为与原始配置完全一致。
+    acp_indicator_key: str | None = None
+    acp_tag_dropout: float = 0.3
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
         # The repack transform is *only* applied to the data coming from the dataset,
@@ -403,26 +410,25 @@ class LeRobotEmbodiChainDataConfig(DataConfigFactory):
         # For your own dataset, first figure out what keys your environment passes to the policy server
         # and then modify the mappings below so your dataset's keys get matched to those target keys.
         # The repack transform simply remaps key names here.
-        repack_transform = _transforms.Group(
-            inputs=[
-                _AliasRepackTransform(
-                    {
-                        "observation/image": ("observation.images.cam_high", "cam_high.color"),
-                        "observation/left_wrist_image": (
-                            "observation.images.cam_left_wrist",
-                            "cam_left_wrist.color",
-                        ),
-                        "observation/right_wrist_image": (
-                            "observation.images.cam_right_wrist",
-                            "cam_right_wrist.color",
-                        ),
-                        "observation/state": ("observation.state", "observation.qpos"),
-                        "actions": ("action",),
-                        "prompt": ("prompt",),
-                    }
-                )
-            ]
-        )
+        repack_structure = {
+            "observation/image": ("observation.images.cam_high", "cam_high.color"),
+            "observation/left_wrist_image": (
+                "observation.images.cam_left_wrist",
+                "cam_left_wrist.color",
+            ),
+            "observation/right_wrist_image": (
+                "observation.images.cam_right_wrist",
+                "cam_right_wrist.color",
+            ),
+            "observation/state": ("observation.state", "observation.qpos"),
+            "actions": ("action",),
+            "prompt": ("prompt",),
+        }
+        if self.acp_indicator_key is not None:
+            # 硬性要求:开了 ACP 的数据集必须带 indicator 列,缺失时
+            # _AliasRepackTransform 会直接报错,避免静默训成全 positive。
+            repack_structure["acp_indicator"] = (self.acp_indicator_key,)
+        repack_transform = _transforms.Group(inputs=[_AliasRepackTransform(repack_structure)])
 
         # The data transforms are applied to the data coming from the dataset *and* during inference.
         # Below, we define the transforms for data going into the model (``inputs``) and the transforms
@@ -430,8 +436,15 @@ class LeRobotEmbodiChainDataConfig(DataConfigFactory):
         # We defined these transforms in `libero_policy.py`. You can check the detailed comments there for
         # how to modify the transforms to match your dataset. Once you created your own transforms, you can
         # replace the transforms below with your own.
+        input_transforms = [libero_policy.EmbodiChainInputs(model_type=model_config.model_type)]
+        if self.acp_indicator_key is not None:
+            # 训练:indicator -> "Advantage: positive/negative" 文本标签(带 dropout);
+            # 推理:请求里没有 indicator,自动追加 positive 标签。
+            input_transforms.insert(
+                0, libero_policy.ACPAdvantageTag(dropout_prob=self.acp_tag_dropout)
+            )
         data_transforms = _transforms.Group(
-            inputs=[libero_policy.EmbodiChainInputs(model_type=model_config.model_type)],
+            inputs=input_transforms,
             outputs=[libero_policy.EmbodiChainOutputs()],
         )
 
@@ -887,7 +900,12 @@ _CONFIGS = [
         name="pi05_base_robosynchallenge_full",
         model=pi0_config.Pi0Config(pi05=True,action_horizon=50),
         data=LeRobotEmbodiChainDataConfig(
-            repo_id="RoboSynChallenge/cobotmagic_Sim_click_bell",
+            # The norm stats live under assets/<repo_id>, and each task's
+            # checkpoint carries its own. Override this to evaluate a task other
+            # than click_bell instead of shuffling assets directories around.
+            repo_id=os.environ.get(
+                "ROBOSYN_REPO_ID", "RoboSynChallenge/cobotmagic_Sim_click_bell"
+            ),
             # Replace with your repo-id
             base_config=DataConfig(prompt_from_task=True),
             # EmbodiChain datasets are usually absolute-action targets.
@@ -918,6 +936,34 @@ _CONFIGS = [
         fsdp_devices=1,
     ),
     TrainConfig(
+        # sim-RECAP 通用配置:同一配置名服务所有任务/轮次,三个要素由环境变量注入
+        # (launch/recap/07_acp_finetune.sh 与 08_eval.sh 会自动设置):
+        #   SIMRECAP_REPO_ID       数据池,如 RoboSynChallenge/simrecap_sample_loading_round1
+        #   SIMRECAP_INDICATOR_KEY indicator 列,如 complementary_info.acp_indicator_round1;
+        #                          设为 none 则不注入标签(纯 SFT 对照组)
+        #   SIMRECAP_WEIGHTS       初始权重 params 目录(迭代式训练指向上一轮 checkpoint)
+        # norm stats 按 repo_id 分目录(assets/pi05_sim_recap/<repo_id>/),跨轮不串。
+        name="pi05_sim_recap",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id=os.environ.get("SIMRECAP_REPO_ID", "RoboSynChallenge/simrecap_sample_loading_round1"),
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+            acp_indicator_key=(
+                None
+                if os.environ.get("SIMRECAP_INDICATOR_KEY", "").lower() == "none"
+                else os.environ.get("SIMRECAP_INDICATOR_KEY", "complementary_info.acp_indicator_round1")
+            ),
+            acp_tag_dropout=0.3,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            os.environ.get("SIMRECAP_WEIGHTS", "gs://openpi-assets/checkpoints/pi05_base/params")
+        ),
+        num_train_steps=20_000,
+        batch_size=64,
+        fsdp_devices=1,
+    ),
+    TrainConfig(
         name="pi05_sample_loading",
         model=pi0_config.Pi0Config(pi05=True,action_horizon=50),
         data=LeRobotEmbodiChainDataConfig(
@@ -933,6 +979,272 @@ _CONFIGS = [
         num_train_steps=20_000,
         batch_size=64,
         fsdp_devices=1,
+    ),
+    TrainConfig(
+        # Evaluation-compatible definition for the unified 10-task H64 model.
+        # Training concatenates ten source repos, while inference only needs
+        # the shared normalization asset id stored in the checkpoint.
+        name="pi05_all10_h64_expert",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=64),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/all10_expert_h64",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "gs://openpi-assets/checkpoints/pi05_base/params"
+        ),
+        num_train_steps=100_000,
+        batch_size=64,
+        fsdp_devices=1,
+        ema_decay=None,
+    ),
+    # =========================================================================
+    # 10 个单任务微调配置 —— 从 all10 co-train 的 checkpoint 67500 起训
+    #   基座: /data/checkpoints/pi05_all10_h64_67500/params  (H64, 10 任务共训, 成功率 46.5%)
+    #   归一化: 复用基座的 all10_expert_h64 norm_stats(不按单任务重算,
+    #           否则输入分布改变会部分作废预训练权重)
+    #   action_horizon 必须为 64,与基座一致
+    # =========================================================================
+    TrainConfig(
+        name="pi05_click_bell_ft67500",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=64),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/cobotmagic_Sim_click_bell",
+            assets=AssetsConfig(
+                assets_dir="/data/checkpoints/pi05_all10_h64_67500/assets",
+                asset_id="RoboSynChallenge/all10_expert_h64",
+            ),
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/checkpoints/pi05_all10_h64_67500/params"),
+        num_train_steps=2960,
+        batch_size=50,
+        fsdp_devices=1,
+        ema_decay=None,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1e-5, decay_steps=2960, decay_lr=1e-6
+        ),
+        save_interval=740,
+        keep_period=740,
+        checkpoint_base_dir="/data/train_out",
+    ),
+    TrainConfig(
+        name="pi05_drawer_open_place_ft67500",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=64),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/cobotmagic_Sim_drawer_open_place",
+            assets=AssetsConfig(
+                assets_dir="/data/checkpoints/pi05_all10_h64_67500/assets",
+                asset_id="RoboSynChallenge/all10_expert_h64",
+            ),
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/checkpoints/pi05_all10_h64_67500/params"),
+        num_train_steps=17000,
+        batch_size=50,
+        fsdp_devices=1,
+        ema_decay=None,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1e-5, decay_steps=17000, decay_lr=1e-6
+        ),
+        save_interval=4250,
+        keep_period=4250,
+        checkpoint_base_dir="/data/train_out",
+    ),
+    TrainConfig(
+        name="pi05_handle_basket_ft67500",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=64),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/cobotmagic_Sim_handle_basket",
+            assets=AssetsConfig(
+                assets_dir="/data/checkpoints/pi05_all10_h64_67500/assets",
+                asset_id="RoboSynChallenge/all10_expert_h64",
+            ),
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/checkpoints/pi05_all10_h64_67500/params"),
+        num_train_steps=13347,
+        batch_size=50,
+        fsdp_devices=1,
+        ema_decay=None,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1e-5, decay_steps=13347, decay_lr=1e-6
+        ),
+        save_interval=3336,
+        keep_period=3336,
+        checkpoint_base_dir="/data/train_out",
+    ),
+    TrainConfig(
+        name="pi05_item_assembly_ft67500",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=64),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/cobotmagic_Sim_item_assembly",
+            assets=AssetsConfig(
+                assets_dir="/data/checkpoints/pi05_all10_h64_67500/assets",
+                asset_id="RoboSynChallenge/all10_expert_h64",
+            ),
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/checkpoints/pi05_all10_h64_67500/params"),
+        num_train_steps=8563,
+        batch_size=50,
+        fsdp_devices=1,
+        ema_decay=None,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1e-5, decay_steps=8563, decay_lr=1e-6
+        ),
+        save_interval=2140,
+        keep_period=2140,
+        checkpoint_base_dir="/data/train_out",
+    ),
+    TrainConfig(
+        name="pi05_items_handover_ft67500",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=64),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/cobotmagic_Sim_items_handover",
+            assets=AssetsConfig(
+                assets_dir="/data/checkpoints/pi05_all10_h64_67500/assets",
+                asset_id="RoboSynChallenge/all10_expert_h64",
+            ),
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/checkpoints/pi05_all10_h64_67500/params"),
+        num_train_steps=13080,
+        batch_size=50,
+        fsdp_devices=1,
+        ema_decay=None,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1e-5, decay_steps=13080, decay_lr=1e-6
+        ),
+        save_interval=3270,
+        keep_period=3270,
+        checkpoint_base_dir="/data/train_out",
+    ),
+    TrainConfig(
+        name="pi05_manipulate_pipette_ft67500",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=64),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/cobotmagic_Sim_manipulate_pipette",
+            assets=AssetsConfig(
+                assets_dir="/data/checkpoints/pi05_all10_h64_67500/assets",
+                asset_id="RoboSynChallenge/all10_expert_h64",
+            ),
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/checkpoints/pi05_all10_h64_67500/params"),
+        num_train_steps=11440,
+        batch_size=50,
+        fsdp_devices=1,
+        ema_decay=None,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1e-5, decay_steps=11440, decay_lr=1e-6
+        ),
+        save_interval=2860,
+        keep_period=2860,
+        checkpoint_base_dir="/data/train_out",
+    ),
+    TrainConfig(
+        name="pi05_mixer_operating_ft67500",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=64),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/cobotmagic_Sim_mixer_operating",
+            assets=AssetsConfig(
+                assets_dir="/data/checkpoints/pi05_all10_h64_67500/assets",
+                asset_id="RoboSynChallenge/all10_expert_h64",
+            ),
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/checkpoints/pi05_all10_h64_67500/params"),
+        num_train_steps=12640,
+        batch_size=50,
+        fsdp_devices=1,
+        ema_decay=None,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1e-5, decay_steps=12640, decay_lr=1e-6
+        ),
+        save_interval=3160,
+        keep_period=3160,
+        checkpoint_base_dir="/data/train_out",
+    ),
+    TrainConfig(
+        name="pi05_sample_loading_ft67500",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=64),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/cobotmagic_Sim_sample_loading",
+            assets=AssetsConfig(
+                assets_dir="/data/checkpoints/pi05_all10_h64_67500/assets",
+                asset_id="RoboSynChallenge/all10_expert_h64",
+            ),
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/checkpoints/pi05_all10_h64_67500/params"),
+        num_train_steps=11250,
+        batch_size=50,
+        fsdp_devices=1,
+        ema_decay=None,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1e-5, decay_steps=11250, decay_lr=1e-6
+        ),
+        save_interval=2812,
+        keep_period=2812,
+        checkpoint_base_dir="/data/train_out",
+    ),
+    TrainConfig(
+        name="pi05_table_rearrangement_ft67500",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=64),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/cobotmagic_Sim_table_rearrangement",
+            assets=AssetsConfig(
+                assets_dir="/data/checkpoints/pi05_all10_h64_67500/assets",
+                asset_id="RoboSynChallenge/all10_expert_h64",
+            ),
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/checkpoints/pi05_all10_h64_67500/params"),
+        num_train_steps=8000,
+        batch_size=50,
+        fsdp_devices=1,
+        ema_decay=None,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1e-5, decay_steps=8000, decay_lr=1e-6
+        ),
+        save_interval=2000,
+        keep_period=2000,
+        checkpoint_base_dir="/data/train_out",
+    ),
+    TrainConfig(
+        name="pi05_water_pouring_ft67500",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=64),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/cobotmagic_Sim_water_pouring",
+            assets=AssetsConfig(
+                assets_dir="/data/checkpoints/pi05_all10_h64_67500/assets",
+                asset_id="RoboSynChallenge/all10_expert_h64",
+            ),
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/checkpoints/pi05_all10_h64_67500/params"),
+        num_train_steps=8082,
+        batch_size=50,
+        fsdp_devices=1,
+        ema_decay=None,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=500, peak_lr=1e-5, decay_steps=8082, decay_lr=1e-6
+        ),
+        save_interval=2020,
+        keep_period=2020,
+        checkpoint_base_dir="/data/train_out",
     ),
     TrainConfig(
         name="pi05_water_pouring",

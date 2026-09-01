@@ -12,6 +12,10 @@
 | `collect_combined_dataset.sh` | 收集 clear + random 数据集并自动合并 |
 | `run_visualize.sh` | 可视化单个任务的域随机化效果 |
 | `batch_run_visualize.sh` | 批量可视化所有任务的域随机化效果 |
+| `run_sim_recap_round.sh` | sim-RECAP 一轮闭环:rollout→合并→打标→价值训练→advantage 写回→发布 v2.1(见 docs/tutorials/sim_recap.md) |
+| `run_value_train.sh` | 训练 pistar06 价值函数(包装 third_party/evo_rl) |
+| `run_value_infer.sh` | 价值推理,把 value/advantage/indicator 写回数据集 |
+| `run_dm05_server.sh` | 启动 DM0.5 推理服务 |
 ---
 
 ## run_task.sh

@@ -17,10 +17,18 @@ stop_requested=0
 trap 'stop_requested=1' INT TERM
 
 attempt=0
+MAX_QUEUE_ATTEMPTS=${MAX_QUEUE_ATTEMPTS:-0}   # >0 时:整批重试这么多次仍失败就放弃(配合 run_env 熔断用)
 while [ "$stop_requested" -eq 0 ]; do
+    if [ "$MAX_QUEUE_ATTEMPTS" -gt 0 ] && [ "$attempt" -ge "$MAX_QUEUE_ATTEMPTS" ]; then
+        echo "[queue] giving up after $attempt failed candidates" >&2
+        exit 42
+    fi
     attempt=$((attempt + 1))
     echo "[queue] starting isolated candidate attempt $attempt"
-    if "$SCRIPT_DIR/collect_validated_batch.sh" "$@"; then
+    # SEED_MASTER 设置时:每次尝试换一个派生主种子(同种子重试只会复现同样的失败)
+    seed_args=()
+    [ -n "${SEED_MASTER:-}" ] && seed_args=(--seed $((SEED_MASTER + attempt - 1)))
+    if "$SCRIPT_DIR/collect_validated_batch.sh" "$@" "${seed_args[@]}"; then
         echo "[queue] attempt $attempt passed all gates"
         exit 0
     else

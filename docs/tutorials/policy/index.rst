@@ -16,4 +16,6 @@ Policy
    smolvla
    pi0
    pi05
+   pi05_lerobot
    motus
+   lila_wam

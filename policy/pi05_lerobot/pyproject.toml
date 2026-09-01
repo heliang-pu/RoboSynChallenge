@@ -1,0 +1,59 @@
+# =============================================================================
+# LeRobot pi0.5 (PyTorch) 独立 uv 环境
+# =============================================================================
+#
+# 安装方式:
+#
+#   训练 + 推理(clone 本仓库即可,无需任何私有资源):
+#     cd policy/pi05_lerobot && uv sync
+#     # 或者什么都不装,直接 bash finetune.sh ...(内部用 uv run --frozen,
+#     # 首次运行会按 uv.lock 自动创建环境)
+#
+#   改动本文件后需要重新锁定: uv lock
+#
+# 为什么这里没有 act/dp 那样的 sim extra
+# -------------------------------------
+# 那两个策略可以把仿真装进同一个环境里跑 eval.sh,本策略不行:
+# 上游 lerobot 要求 Python >=3.12 且依赖 transformers v5,而仿真侧钉死在
+# Python 3.11(仓库根 .venv)。两者在同一个解释器里装不下,这不是可以
+# 「顺手修好」的版本冲突。
+#
+# 所以 eval 走的是跨进程:scripts/eval_policy.py 在仿真环境里跑,策略本体由
+# pi05_worker.py 在本环境里跑,两边用 stdio JSON 通信。eval.sh 会自动把
+# 本目录的 .venv/bin/python 传给 worker,不需要额外配置。
+#
+# MEM 版本要求
+# -----------
+# lerobot 锁在含 MEM 的 upstream commit(huggingface/lerobot#4076,
+# src/lerobot/policies/pi05/memory.py)。往前退版本会让 use_visual_memory /
+# use_proprioceptive_memory 直接不存在,setup_lerobot.sh 里也有同样的校验。
+# =============================================================================
+
+[project]
+name = "robosynchallenge-pi05-lerobot"
+version = "0.1.0"
+description = "LeRobot pi0.5 (PyTorch) with MEM observation memory, integrated into RoboSynChallenge"
+# lerobot 上游要求 >=3.12;仿真侧的 3.11 装不了这个环境,见文件头说明。
+requires-python = ">=3.12"
+
+dependencies = [
+    # pi       -> transformers + scipy,PI05Policy 必需
+    # training -> dataset(datasets/pyarrow/torchcodec/av)+ wandb + accelerate
+    "lerobot[pi,training]",             # 版本由下方 git rev 锁定
+    "numpy>=1.26",
+    "pyyaml>=6.0",
+    "safetensors>=0.4",                 # deploy_policy 读 checkpoint 的归一化统计
+]
+
+[tool.uv.sources]
+# 锁到含 MEM 的 upstream commit(2026-08-31 的 main)。
+# 换 rev 之后必须 uv lock 重新锁定,并确认新 rev 里仍有
+# src/lerobot/policies/pi05/memory.py。
+lerobot = { git = "https://github.com/huggingface/lerobot", rev = "d36d404b65315139b7601a707f260a3db736462f" }
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = []

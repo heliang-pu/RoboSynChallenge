@@ -1385,3 +1385,312 @@ def sync_object_xy_position(
     # Set the synchronized pose
     target_obj.set_local_pose(tgt_pose, env_ids=env_ids)
     target_obj.clear_dynamics(env_ids=env_ids)
+
+
+# ---------------------------------------------------------------------------
+# RoboSynChallenge 本地新增:合成数据分布变体用的约束随机化(不改动官方任何函数)
+# ---------------------------------------------------------------------------
+
+def randomize_linked_table_and_object_poses(
+    env: EmbodiedEnv,
+    env_ids: torch.Tensor | None,
+    table_entity_cfg: SceneEntityCfg | Dict,
+    first_entity_cfg: SceneEntityCfg | Dict,
+    second_entity_cfg: SceneEntityCfg | Dict,
+    shared_z_range: tuple[float, float],
+    first_position_range: tuple[list[float], list[float]],
+    second_position_range: tuple[list[float], list[float]],
+    relative_position: bool = True,
+    physics_update_step: int = 1,
+) -> None:
+    """Randomize two object XY poses while linking both roots to table height.
+
+    ``item_assembly`` historically sampled the table Z independently while the
+    two tube roots stayed at their fixed asset Z.  When the table centre rose
+    above the tube roots, PhysX expelled the embedded tubes downward.  This
+    atomic event draws one table-height offset and adds it to the table and both
+    objects, while retaining independent XY ranges for the two objects.
+
+    The object position ranges follow the same convention as
+    :func:`randomize_rigid_object_pose`: with ``relative_position=True`` they
+    are offsets from each object's configured ``init_pos``.  Their configured Z
+    offsets must be zero because Z is supplied by ``shared_z_range``.
+    """
+
+    env_ids = _normalize_event_env_ids(env, env_ids)
+    if env_ids.numel() == 0:
+        return
+
+    def _entity(value: SceneEntityCfg | Dict) -> SceneEntityCfg:
+        return SceneEntityCfg(**value) if isinstance(value, dict) else value
+
+    table_cfg = _entity(table_entity_cfg)
+    first_cfg = _entity(first_entity_cfg)
+    second_cfg = _entity(second_entity_cfg)
+    table = env.sim.get_rigid_object(table_cfg.uid)
+    first = env.sim.get_rigid_object(first_cfg.uid)
+    second = env.sim.get_rigid_object(second_cfg.uid)
+    missing = [
+        cfg.uid
+        for cfg, asset in ((table_cfg, table), (first_cfg, first), (second_cfg, second))
+        if asset is None
+    ]
+    if missing:
+        raise RuntimeError(f"Linked table/object randomization assets not found: {missing}")
+
+    if len(shared_z_range) != 2 or float(shared_z_range[0]) > float(shared_z_range[1]):
+        raise ValueError("shared_z_range must be [lower, upper]")
+    for name, value in (
+        ("first_position_range", first_position_range),
+        ("second_position_range", second_position_range),
+    ):
+        value_tensor = torch.as_tensor(value, dtype=torch.float32, device=env.device)
+        if value_tensor.shape != (2, 3):
+            raise ValueError(f"{name} must have shape [2, 3]")
+        if bool(torch.any(value_tensor[0] > value_tensor[1])):
+            raise ValueError(f"{name} lower bounds exceed upper bounds")
+        if not bool(torch.allclose(value_tensor[:, 2], torch.zeros(2, device=env.device))):
+            raise ValueError(f"{name} Z bounds must be zero; use shared_z_range")
+
+    count = len(env_ids)
+    shared_z = sample_uniform(
+        lower=torch.tensor(float(shared_z_range[0]), device=env.device),
+        upper=torch.tensor(float(shared_z_range[1]), device=env.device),
+        size=(count,),
+        device=env.device,
+    )
+
+    def _initial_pose(asset: RigidObject) -> torch.Tensor:
+        init_pos, init_rot = _get_asset_initial_root_pose(env, asset, env_ids)
+        pose = (
+            torch.eye(4, dtype=torch.float32, device=env.device)
+            .unsqueeze(0)
+            .repeat(count, 1, 1)
+        )
+        pose[:, :3, :3] = init_rot
+        pose[:, :3, 3] = init_pos
+        return pose
+
+    table_pose = _initial_pose(table)
+    table_pose[:, 2, 3] += shared_z
+
+    def _object_pose(asset: RigidObject, position_range) -> torch.Tensor:
+        pose = _initial_pose(asset)
+        sampled = sample_uniform(
+            lower=torch.as_tensor(position_range[0], dtype=torch.float32, device=env.device),
+            upper=torch.as_tensor(position_range[1], dtype=torch.float32, device=env.device),
+            size=(count, 3),
+            device=env.device,
+        )
+        if relative_position:
+            pose[:, :3, 3] += sampled
+        else:
+            pose[:, :3, 3] = sampled
+        pose[:, 2, 3] += shared_z
+        return pose
+
+    first_pose = _object_pose(first, first_position_range)
+    second_pose = _object_pose(second, second_position_range)
+    for asset, pose in (
+        (table, table_pose),
+        (first, first_pose),
+        (second, second_pose),
+    ):
+        asset.set_local_pose(pose, env_ids=env_ids)
+        asset.clear_dynamics(env_ids=env_ids)
+
+    if physics_update_step > 0:
+        env.sim.update(step=physics_update_step)
+
+
+def _projected_obb_separation_2d(
+    first_pose: torch.Tensor,
+    second_pose: torch.Tensor,
+    first_half_extents: torch.Tensor,
+    second_half_extents: torch.Tensor,
+) -> torch.Tensor:
+    """Return the largest separating-axis gap between projected 3D OBBs."""
+
+    first_rot = first_pose[:, :3, :3]
+    second_rot = second_pose[:, :3, :3]
+    first_generators = first_rot[:, :2, :] * first_half_extents.view(1, 1, 3)
+    second_generators = second_rot[:, :2, :] * second_half_extents.view(1, 1, 3)
+    generators = torch.cat((first_generators, second_generators), dim=2)
+
+    axes = torch.stack((-generators[:, 1, :], generators[:, 0, :]), dim=-1)
+    axis_norm = torch.linalg.norm(axes, dim=-1, keepdim=True)
+    valid_axis = axis_norm[..., 0] > 1e-7
+    axes = axes / axis_norm.clamp_min(1e-7)
+
+    first_radius = torch.sum(
+        torch.abs(torch.einsum("bai,bij->baj", axes, first_rot[:, :2, :]))
+        * first_half_extents.view(1, 1, 3),
+        dim=-1,
+    )
+    second_radius = torch.sum(
+        torch.abs(torch.einsum("bai,bij->baj", axes, second_rot[:, :2, :]))
+        * second_half_extents.view(1, 1, 3),
+        dim=-1,
+    )
+    center_delta = second_pose[:, :2, 3] - first_pose[:, :2, 3]
+    center_projection = torch.abs(torch.einsum("bai,bi->ba", axes, center_delta))
+    gaps = center_projection - first_radius - second_radius
+    gaps = torch.where(valid_axis, gaps, torch.full_like(gaps, -torch.inf))
+    return torch.max(gaps, dim=1).values
+
+
+def _sample_rigid_pose_from_ranges(
+    init_pos: torch.Tensor,
+    init_rot: torch.Tensor,
+    position_range: tuple[list[float], list[float]],
+    rotation_range: tuple[list[float], list[float]],
+    relative_position: bool,
+    relative_rotation: bool,
+) -> torch.Tensor:
+    """Sample matrix poses using the same conventions as spatial randomization."""
+
+    count = init_pos.shape[0]
+    device = init_pos.device
+    position = sample_uniform(
+        lower=torch.as_tensor(position_range[0], dtype=torch.float32, device=device),
+        upper=torch.as_tensor(position_range[1], dtype=torch.float32, device=device),
+        size=(count, 3),
+        device=device,
+    )
+    if relative_position:
+        position = position + init_pos
+
+    euler = sample_uniform(
+        lower=torch.as_tensor(rotation_range[0], dtype=torch.float32, device=device),
+        upper=torch.as_tensor(rotation_range[1], dtype=torch.float32, device=device),
+        size=(count, 3),
+        device=device,
+    )
+    rotation = matrix_from_euler(euler * torch.pi / 180.0)
+    if relative_rotation:
+        rotation = torch.bmm(init_rot, rotation)
+
+    pose = (
+        torch.eye(4, dtype=torch.float32, device=device)
+        .unsqueeze(0)
+        .repeat(count, 1, 1)
+    )
+    pose[:, :3, :3] = rotation
+    pose[:, :3, 3] = position
+    return pose
+
+
+def randomize_rigid_object_pair_pose_constrained(
+    env: EmbodiedEnv,
+    env_ids: torch.Tensor | None,
+    first_entity_cfg: SceneEntityCfg | Dict,
+    second_entity_cfg: SceneEntityCfg | Dict,
+    first_position_range: tuple[list[float], list[float]],
+    second_position_range: tuple[list[float], list[float]],
+    first_rotation_range: tuple[list[float], list[float]],
+    second_rotation_range: tuple[list[float], list[float]],
+    first_half_extents: list[float],
+    second_half_extents: list[float],
+    first_relative_position: bool = False,
+    second_relative_position: bool = False,
+    first_relative_rotation: bool = True,
+    second_relative_rotation: bool = True,
+    min_xy_clearance: float = 0.03,
+    max_xy_center_distance: float | None = 0.4,
+    max_resample_attempts: int = 256,
+    physics_update_step: int = 1,
+) -> None:
+    """Jointly randomize two objects while rejecting unsafe layouts.
+
+    The projected oriented bounding boxes must be disjoint by at least
+    ``min_xy_clearance``. The optional maximum centre distance keeps the pair
+    inside a task-reachable envelope.
+    """
+
+    env_ids = _normalize_event_env_ids(env, env_ids)
+    first_cfg = (
+        SceneEntityCfg(**first_entity_cfg)
+        if isinstance(first_entity_cfg, dict)
+        else first_entity_cfg
+    )
+    second_cfg = (
+        SceneEntityCfg(**second_entity_cfg)
+        if isinstance(second_entity_cfg, dict)
+        else second_entity_cfg
+    )
+    first = env.sim.get_rigid_object(first_cfg.uid)
+    second = env.sim.get_rigid_object(second_cfg.uid)
+    if first is None or second is None:
+        raise RuntimeError(
+            f"Constrained pair objects not found: {first_cfg.uid!r}, {second_cfg.uid!r}"
+        )
+
+    first_init_pos, first_init_rot = _get_asset_initial_root_pose(env, first, env_ids)
+    second_init_pos, second_init_rot = _get_asset_initial_root_pose(
+        env, second, env_ids
+    )
+    first_extents = torch.as_tensor(
+        first_half_extents, dtype=torch.float32, device=env.device
+    )
+    second_extents = torch.as_tensor(
+        second_half_extents, dtype=torch.float32, device=env.device
+    )
+    if first_extents.shape != (3,) or second_extents.shape != (3,):
+        raise ValueError(
+            "first_half_extents and second_half_extents must each have 3 values"
+        )
+
+    first_pose = torch.empty(
+        (len(env_ids), 4, 4), dtype=torch.float32, device=env.device
+    )
+    second_pose = torch.empty_like(first_pose)
+    valid = torch.zeros(len(env_ids), dtype=torch.bool, device=env.device)
+    for _ in range(max_resample_attempts):
+        pending = torch.nonzero(~valid, as_tuple=False).squeeze(-1)
+        if pending.numel() == 0:
+            break
+        sampled_first = _sample_rigid_pose_from_ranges(
+            first_init_pos[pending],
+            first_init_rot[pending],
+            first_position_range,
+            first_rotation_range,
+            first_relative_position,
+            first_relative_rotation,
+        )
+        sampled_second = _sample_rigid_pose_from_ranges(
+            second_init_pos[pending],
+            second_init_rot[pending],
+            second_position_range,
+            second_rotation_range,
+            second_relative_position,
+            second_relative_rotation,
+        )
+        clearance = _projected_obb_separation_2d(
+            sampled_first, sampled_second, first_extents, second_extents
+        )
+        accepted = clearance >= float(min_xy_clearance)
+        if max_xy_center_distance is not None:
+            center_distance = torch.linalg.norm(
+                sampled_first[:, :2, 3] - sampled_second[:, :2, 3], dim=-1
+            )
+            accepted &= center_distance <= float(max_xy_center_distance)
+        accepted_pending = pending[accepted]
+        first_pose[accepted_pending] = sampled_first[accepted]
+        second_pose[accepted_pending] = sampled_second[accepted]
+        valid[accepted_pending] = True
+
+    if not bool(torch.all(valid)):
+        failed_ids = env_ids[~valid].detach().cpu().tolist()
+        raise RuntimeError(
+            "Unable to sample a collision-free object pair after "
+            f"{max_resample_attempts} attempts for env ids {failed_ids}. "
+            "Widen the ranges or reduce min_xy_clearance."
+        )
+
+    first.set_local_pose(first_pose, env_ids=env_ids)
+    second.set_local_pose(second_pose, env_ids=env_ids)
+    first.clear_dynamics(env_ids=env_ids)
+    second.clear_dynamics(env_ids=env_ids)
+    if physics_update_step > 0:
+        env.sim.update(step=physics_update_step)
+

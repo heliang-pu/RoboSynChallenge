@@ -41,7 +41,93 @@ class HandleBasketEnv(EmbodiedEnv):
     def __init__(self, cfg: EmbodiedEnvCfg = None, **kwargs):
         super().__init__(cfg, **kwargs)
 
+        self.action_config = kwargs.get("action_config", None)
+        self.affordance_datas = {}
 
+        # Runtime attributes referenced by the legacy carry-basket action
+        # graph.  These used to be initialized by the v1 scene pipeline; the
+        # current environment must provide them explicitly.
+        self.milk_grasp_pose_object = np.eye(4, dtype=np.float32)
+        self.basket_grasp_pose_object = np.eye(4, dtype=np.float32)
+        self.milk_grasp_offset = 0.0
+        self.basket_grasp_offset = 0.0
+        self.milk_pose_orig = np.eye(4, dtype=np.float32)
+        self.basket_pose_orig = np.eye(4, dtype=np.float32)
+        self.milk_xy_random_center = np.zeros(2, dtype=np.float32)
+        self.basket_xy_random_center = np.zeros(2, dtype=np.float32)
+
+        self.agent_qpos_flip_ids = [3, 4]
+        self.agent_qpos_flip_threshold = 3.455751918948773
+        self.agent_qpos_flip_mode = "delta"
+        self.use_legacy_pose_prior = bool(kwargs.get("use_legacy_pose_prior", False))
+
+    @staticmethod
+    def _to_matrix4(data: np.ndarray | torch.Tensor | list | tuple) -> np.ndarray:
+        arr = np.asarray(data)
+        if arr.ndim == 3:
+            arr = arr[0]
+        return arr
+
+    @staticmethod
+    def _apply_legacy_pose_prior(pose: np.ndarray, obj_name: str) -> np.ndarray:
+        out_pose = np.asarray(pose, dtype=np.float32).copy()
+        if obj_name == "basket":
+            rot_x = np.eye(4, dtype=np.float32)
+            c, s = np.cos(np.deg2rad(90.0)), np.sin(np.deg2rad(90.0))
+            rot_x[:3, :3] = np.array(
+                [[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]], dtype=np.float32
+            )
+            out_pose = out_pose @ rot_x
+        elif obj_name == "milk":
+            c, s = np.cos(np.deg2rad(-19.0)), np.sin(np.deg2rad(-19.0))
+            rot_z = np.array(
+                [[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32
+            )
+            out_pose[:3, :3] = rot_z @ out_pose[:3, :3]
+        return out_pose
+
+    def _sync_carry_basket_runtime_attrs(self) -> None:
+        """Refresh legacy action-graph attributes from current affordances."""
+        aff = getattr(self, "affordance_datas", {})
+
+        def _first_existing(*keys: str) -> np.ndarray | None:
+            for key in keys:
+                if key in aff:
+                    return self._to_matrix4(aff[key]).astype(np.float32)
+            return None
+
+        milk_pose = _first_existing("milk_pose", "milk_pose_orig")
+        basket_pose = _first_existing("basket_pose", "basket_pose_orig")
+        milk_grasp_pose_obj = _first_existing(
+            "milk_grasp_pose_object", "milk_milk_grasp_pose_object"
+        )
+        basket_grasp_pose_obj = _first_existing(
+            "basket_grasp_pose_object", "basket_basket_grasp_pose_object"
+        )
+
+        if milk_pose is not None:
+            self.milk_pose_orig = milk_pose
+        if basket_pose is not None:
+            self.basket_pose_orig = basket_pose
+        if milk_grasp_pose_obj is not None:
+            self.milk_grasp_pose_object = milk_grasp_pose_obj
+        if basket_grasp_pose_obj is not None:
+            self.basket_grasp_pose_object = basket_grasp_pose_obj
+
+        if self.use_legacy_pose_prior:
+            self.milk_pose_orig = self._apply_legacy_pose_prior(
+                self.milk_pose_orig, "milk"
+            )
+            self.basket_pose_orig = self._apply_legacy_pose_prior(
+                self.basket_pose_orig, "basket"
+            )
+
+        self.milk_xy_random_center = np.asarray(
+            self.milk_pose_orig[:2, 3], dtype=np.float32
+        )
+        self.basket_xy_random_center = np.asarray(
+            self.basket_pose_orig[:2, 3], dtype=np.float32
+        )
 
     def get_arm_fk(
         self, qpos: np.ndarray, control_part: str, is_world_coordinates=True
@@ -186,9 +272,7 @@ class HandleBasketEnv(EmbodiedEnv):
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
         obs, info = super().reset(seed=seed, options=options)
         self._hb_diag_step = 0
-        self._hb_orig_basket_x = None
-        self._hb_orig_basket_y = None
-        self._hb_orig_basket_z = None
+        self._capture_basket_success_baseline()
         self._hb_stable_steps = 0
         self._hb_last_success_check_env_step = None
         self._hb_debug_flags = None
@@ -197,6 +281,30 @@ class HandleBasketEnv(EmbodiedEnv):
         self._hb_diag_path = None
 
         return obs, info
+
+    def _capture_basket_success_baseline(self) -> None:
+        """Record the basket pose before the expert trajectory starts.
+
+        Sampling this lazily inside ``is_task_success`` is too late for offline
+        collection because its first call normally happens after the expert
+        rollout.  The resulting zero displacement makes the official move/lift
+        predicate impossible even when the trajectory is correct.
+        """
+        self._hb_orig_basket_x = None
+        self._hb_orig_basket_y = None
+        self._hb_orig_basket_z = None
+        try:
+            pose = self.sim.get_rigid_object("basket").get_local_pose(to_matrix=True)
+            arr = torch.as_tensor(pose).detach().cpu().numpy()
+            if arr.ndim == 3:
+                arr = arr[0]
+            self._hb_orig_basket_x = float(arr[0, 3])
+            self._hb_orig_basket_y = float(arr[1, 3])
+            self._hb_orig_basket_z = float(arr[2, 3])
+        except Exception:
+            # Keep the historical lazy fallback for environments where the
+            # object is not yet available during reset.
+            pass
 
     def is_task_success(self, **kwargs) -> torch.Tensor:
         """Success when the carried basket moves left with milk inside stably."""
