@@ -13,15 +13,27 @@
 
 > **分支导航** — 本仓库按主题分支开发，每个分支的说明就在各自 README 的这个位置。
 >
-> **`main`（当前）** 基线 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · [`feat/lila-wam`](../../tree/feat/lila-wam) / [`feat/lerobot-pi05-mem`](../../tree/feat/lerobot-pi05-mem) LiLa-WAM、覆盖度采集与 LeRobot pi0.5 MEM · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练
+> **`main`（当前）** 测评 · [`official/main`](../../tree/official/main) 官方同步 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练
 
-## 本分支：`main` — 基线
+## 本分支：`main` — 测评分支
 
-与主办方上游 `EDEM-AI/RoboSynChallenge` 保持同步的基线，放所有实验分支共用的东西：完整的中文项目说明、按需安装的 uv 训练环境、10 个任务的采集/训练/评估流程，以及**回退到官方口径的成功判定**（本地改过的判定已全部撤回，避免与排行榜对不上）。
+**跑评测的地方**，也是各条实验线的汇合点：实验分支做完合回这里，在统一口径下横向比较。
+因此它的 policy 目录最全，`tests/` 与仓库根 `.venv` 也只在这条分支上。
+共用的东西同样放这里：完整的中文项目说明、按需安装的 uv 训练环境、10 个任务的采集/训练/评估流程，
+以及**回退到官方口径的成功判定**（本地改过的判定已全部撤回，避免与排行榜对不上）。
 
-功能开发在下面的主题分支上做。上游有更新时先合到本分支，再由各分支合过去；主题分支做完也可以合回本分支。
+分支分三类：
 
-`feat/lila-wam` / `feat/lerobot-pi05-mem` 的工作已并入，内容如下。
+| 分支 | 角色 |
+|---|---|
+| `main` | **测评分支**，实验分支合流后在这里跑评测 |
+| `official/main` | **官方同步分支**，跟踪主办方 `EDEM-AI/RoboSynChallenge`，只负责把上游拉进来，不在上面开发 |
+| `sim-recap` / `feat/rtc-async-pi05` / `feat/realtime-vla-pi05` / `ppo-post-training` | 实验分支，各管一摊 |
+
+功能开发在实验分支上做，各自开了 worktree（`git worktree list` 是权威清单），
+**每个 worktree 有各自的 `CLAUDE.md`**，按该分支实际有的东西写，不要跨目录照搬。
+
+`feat/lila-wam` 与 `feat/lerobot-pi05-mem` 已于 2026-09-01 合入本分支并删除，内容如下。
 
 ### LiLa-WAM 接入与随机化覆盖度采集
 
