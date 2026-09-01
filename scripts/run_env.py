@@ -43,6 +43,35 @@ gym_utils.DEFAULT_MANAGER_MODULES = gym_utils.DEFAULT_MANAGER_MODULES + [
 ]
 
 
+def _patch_motion_generator_to_cpu():
+    """任务 action bank 的 `ret.positions[0].numpy()` 假设规划结果在 cpu 上。
+
+    cpu 设备(日常口径)无感;cuda 设备下不打这个补丁 bank 直接 TypeError。
+    tasks/ 目录有「与官方逐字节一致」红线,不改 bank,在规划器出口统一搬运。
+    与 scripts/expert_plan_worker.py 中的同名补丁保持一致。
+    """
+    import torch as _torch
+    from embodichain.lab.sim.planners import MotionGenerator
+
+    original_generate = MotionGenerator.generate
+
+    def generate_on_cpu(self, *args, **kwargs):
+        ret = original_generate(self, *args, **kwargs)
+        positions = getattr(ret, "positions", None)
+        if _torch.is_tensor(positions) and positions.is_cuda:
+            ret.positions = positions.cpu()
+        elif isinstance(positions, (list, tuple)):
+            ret.positions = type(positions)(
+                p.cpu() if _torch.is_tensor(p) and p.is_cuda else p for p in positions
+            )
+        return ret
+
+    MotionGenerator.generate = generate_on_cpu
+
+
+_patch_motion_generator_to_cpu()
+
+
 def _report_value(value):
     if isinstance(value, torch.Tensor):
         return value.detach().to(device="cpu").tolist()
@@ -255,6 +284,14 @@ def _generate_until_saved_episode_target(args, env, gym_config, num_traj: int) -
 
 
 def run_env_main(args, env, gym_config):
+    if int(getattr(args, "num_envs", 1) or 1) > 1:
+        if getattr(args, "replay", False) or getattr(args, "preview", False):
+            log_warning("--num_envs > 1 与 --replay/--preview 互斥。")
+            sys.exit(2)
+        from scripts.parallel_collection import run_parallel_collection
+
+        return run_parallel_collection(args, env, gym_config)
+
     if getattr(args, "replay", False):
         replay_trajectory(
             env,
@@ -383,7 +420,8 @@ if __name__ == "__main__":
 
     env = gym.make(id=gym_config["id"], cfg=env_cfg, **action_config)
 
-    if getattr(args, "seed", None) is not None:
+    if getattr(args, "seed", None) is not None and int(getattr(args, "num_envs", 1) or 1) == 1:
+        # 并行模式自己管种子(每槽位显式 seed + 边车),不套 SeededCollection。
         from scripts.seeded_collection import SeededCollection
 
         env = SeededCollection(

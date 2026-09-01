@@ -13,30 +13,29 @@
 
 > **分支导航** — 本仓库按主题分支开发，每个分支的说明就在各自 README 的这个位置。
 >
-> [`main`](../../tree/main) 测评 · [`official/main`](../../tree/official/main) 官方同步 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练 · **`feat/parallel-eval`（当前）** 并行评估
+> [`main`](../../tree/main) 测评 · [`official/main`](../../tree/official/main) 官方同步 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练 · [`feat/parallel-eval`](../../tree/feat/parallel-eval) 并行评估 · **`feat/parallel-collect`（当前）** 并行采集
 
-## 本分支：`feat/parallel-eval` — 单进程多环境并行评估
+## 本分支：`feat/parallel-collect` — 单进程多环境并行专家数据采集
 
-给 `scripts/eval_policy.py` 加 **wave 批次并行评估**（`--num_envs N`），利用
-EmbodiChain/DexSim 的多 arena 批量仿真（PhysX GPU 物理 + camera group 批量渲染），
-一个进程一张卡同时推进 N 个 episode。与既有的 `num_shards` 多进程分片正交，可叠加。
+从 [`feat/parallel-eval`](../../tree/feat/parallel-eval) 切出。批量环境负责摆场景/
+执行/渲染/录制（EmbodiChain 多 arena），专家**规划**放在单环境 worker 子进程里
+（`scripts/expert_plan_worker.py`）：同一个 seed 两边场景逐位一致，规划走完全原生的
+单环境链路——10 个任务的 action bank 与 `robosynchallenge/tasks/` **零改动**。
 
 ```bash
-python scripts/eval_policy.py --config policy/act/deploy_policy.yml \
-    --overrides --task_name click_bell --setting random \
-    --max_episodes 100 --num_envs 8 --device cuda --headless True
+bash launch/run_task.sh click_bell random 3_0 --max_episodes 100 --headless \
+    --num_envs 4 --device cuda --seed 7 --success_settle_steps 30
 ```
 
-- **种子口径不变**：rng 按 episode 序号同序抽种子，每个槽位
-  `reset(seed=seed_k, reset_ids=[slot])` 单独播种，初始场景与单环境同种子逐位一致（实测）
-- **官方判定逐条对应**：`ParallelEvalProxy` 每步锁存 per-env `is_task_success`，
-  截断步不计成功；聚合布尔喂给适配器，**策略适配器零改动**
-- **`num_envs=1`（默认）走原串行循环**，行为与 main 一致
-- 顺手修复：`env.close()` 会终止进程，原先放 `finally` 导致 summary 与
-  `evaluation_metrics.json` 从未落盘；已挪到指标写盘之后
-- 支持状态：`act` 进程内路径 ✅；worker 类与 `pi05`（openpi/JAX）待批量化
+- 逐集显式种子 + `episode_success.json` 边车，采集内容 = 串行种子化采集在该 seed
+  下会产出的那条（worker 的官方初始 qpos 会回写进槽位）
+- 成功槽位在 reset 前直接 `apply(mode="save")` 落盘，规避共享写指针清零陷阱
+- wave 内尾帧 padding 等长执行；失败换种子重试、`max_generation_attempts`/exit 3
+  口径与串行一致
+- 依赖 EmbodiChain 本地分支 `parallel-fixes`（partial-reset 修复，未合上游）
 
-设计、语义、已知偏差与策略支持表：**[docs/parallel_eval.md](docs/parallel_eval.md)**。
+设计、语义对照、已知限制：**[docs/parallel_collection.md](docs/parallel_collection.md)**；
+并行评估部分见 **[docs/parallel_eval.md](docs/parallel_eval.md)**。
 
 ---
 
