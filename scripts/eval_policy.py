@@ -754,6 +754,11 @@ def main():
     # Evaluation loop
     platform_metadata = collect_platform_metadata()
     rng = np.random.RandomState(seed)
+    # 分片:每个进程只真正执行属于自己的那些 episode,但 rng 照常逐个抽取,
+    # 保证各分片拿到的种子和「单进程跑满 max_episodes」时完全一致,合并后就是同一批集。
+    num_shards = int(config.get("num_shards", 1) or 1)
+    shard_index = int(config.get("shard_index", 0) or 0)
+    episodes_run = 0
     success_count = 0
     episode_records = []
     loop_completed = False
@@ -763,6 +768,8 @@ def main():
     print(f"\n{'='*25} Starting Evaluation {'='*25}\n")
     print(f"  Policy: {policy_name}  |  Task: {task_name}")
     print(f"  Episodes: {max_episodes}  |  Seed: {seed}")
+    if num_shards > 1:
+        print(f"  Shard: {shard_index}/{num_shards} (本进程只跑 episode % {num_shards} == {shard_index})")
     print(
         f"  Max env steps: {max_env_steps} "
         f"(deploy_config.max_steps={deploy_max_steps}, "
@@ -779,6 +786,9 @@ def main():
                 if fixed_episode_seed is not None
                 else int(rng.randint(0, 2**31 - 1))
             )
+            if num_shards > 1 and episode % num_shards != shard_index:
+                continue
+            episodes_run += 1
             if video_recorder:
                 video_recorder.start_episode(episode, ep_seed)
 
@@ -911,7 +921,10 @@ def main():
             "setting": config.get("setting"),
             "checkpoint_path": config.get("checkpoint_path"),
             "dp_num_inference_steps": config.get("dp_num_inference_steps"),
-            "episode_count": max_episodes,
+            "episode_count": episodes_run,
+            "episode_count_full": max_episodes,
+            "num_shards": num_shards,
+            "shard_index": shard_index,
             "timeout_action_steps": max_env_steps,
             "seed": seed,
         },
@@ -929,8 +942,8 @@ def main():
     average_inference_time = summary["average_inference_time_seconds"]
     print(f"\n{'='*50}")
     print(
-        f"  Evaluation Results Summary: {success_count}/{max_episodes} "
-        f"({100*success_count/max_episodes:.1f}%)"
+        f"  Evaluation Results Summary: {success_count}/{episodes_run} "
+        f"({100*success_count/max(episodes_run,1):.1f}%)"
     )
     print(
         f"  Average action steps: {summary['average_action_steps']:.2f}/"
