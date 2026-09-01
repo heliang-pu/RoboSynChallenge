@@ -79,8 +79,10 @@ import `launch_testing` 并崩在 `No module named 'lark'`。**2026-09-01 已把
 - `test_rtc_pi05.py` 需要 JAX，根环境 collect 就报 `No module named 'jax'`（会中断整个 run，
   所以上面加 `--ignore`），只能在 `policy/pi05` 环境里跑；
 - `test_task_success_conditions.py` / `test_success_dataset_replay.py` / `test_sample_loading_success.py`
-  共 16 个失败，因为判定已全量回退到官方版（见下），这些测试还在调已被删除的 `_evaluate_task_state`；
-- 绿的 19 个：`test_constrained_randomization.py`、`test_linked_table_object_randomization.py`、
+  共 18 个失败，因为判定已全量回退到官方版（见下），这些测试还在调已被删除的 `_evaluate_task_state`
+  与本地打点接口。它们全部来自 `f70a7ef`，是给**本地改过的判定**写的；判定恢复官方版后这批测试
+  失去对象，应删除或按官方判定重写，不要靠改生产代码去让它们变绿；
+- 绿的 17 个：`test_constrained_randomization.py`、`test_linked_table_object_randomization.py`、
   `test_seeded_collection.py`、`test_pi05_lerobot_adapter.py`（12 个，不需要 checkpoint）。
 
 ## 架构要点

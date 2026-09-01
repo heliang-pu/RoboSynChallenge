@@ -139,21 +139,6 @@ class WaterPouringEnv(EmbodiedEnv):
                         actions[:, 0, active_idx] = local_action_data[:, i]
         return actions
 
-    def step(self, action, **kwargs):
-        """Advance the simulation and update the temporal success latches.
-
-        The pouring predicate is intentionally sequential: it must observe the
-        bottle while tilted, then observe it returned upright.  Collection
-        checks ``is_task_success`` after the expert trajectory, when the bottle
-        is already upright, so evaluating only at the end can never set
-        ``_pouring_started``.  Sampling the unchanged official predicate after
-        every environment step preserves its thresholds while making the latch
-        observe the actual pouring phase.
-        """
-        result = super().step(action, **kwargs)
-        self._evaluate_task_state()
-        return result
-
  
     def _evaluate_task_state(self) -> Tuple[torch.Tensor, torch.Tensor, Dict]:
         bottle_pose = self.sim.get_rigid_object("bottle").get_local_pose(to_matrix=True)
@@ -167,24 +152,17 @@ class WaterPouringEnv(EmbodiedEnv):
         bottle_mouth = bottle_position + 0.236 * bottle_axis
         mouth_to_cup = cup_position - bottle_mouth
 
-        gripper_distance = torch.linalg.norm(
-            bottle_position - right_eef_pose[:, :3, 3], dim=-1
+        near_gripper = (
+            torch.linalg.norm(bottle_position - right_eef_pose[:, :3, 3], dim=-1) < 0.30
         )
-        bottle_lift_delta = bottle_position[:, 2] - self._initial_bottle_z
-        near_gripper = gripper_distance < 0.30
         held = near_gripper & (
-            (bottle_lift_delta > 0.03) | self._grasp_started
-        )
-        mouth_xy_distance = torch.linalg.norm(mouth_to_cup[:, :2], dim=-1)
-        mouth_height_delta = bottle_mouth[:, 2] - cup_position[:, 2]
-        mouth_axis_dot = torch.sum(
-            bottle_axis[:, :2] * mouth_to_cup[:, :2], dim=-1
+            (bottle_position[:, 2] > self._initial_bottle_z + 0.03) | self._grasp_started
         )
         relative_pose_valid = (
-            (mouth_xy_distance < 0.08)
-            & (mouth_height_delta > 0.04)
-            & (mouth_height_delta < 0.30)
-            & (mouth_axis_dot > -0.02)
+            (torch.linalg.norm(mouth_to_cup[:, :2], dim=-1) < 0.08)
+            & (bottle_mouth[:, 2] > cup_position[:, 2] + 0.04)
+            & (bottle_mouth[:, 2] < cup_position[:, 2] + 0.30)
+            & (torch.sum(bottle_axis[:, :2] * mouth_to_cup[:, :2], dim=-1) > -0.02)
         )
         cup_fall = self._is_fall_z(cup_pose)
         pouring_now = (
@@ -204,26 +182,7 @@ class WaterPouringEnv(EmbodiedEnv):
             & (~self._grasp_lost)
             & (~cup_fall)
         )
-        metrics = {
-            "bottle_angle_deg": bottle_angle * (180.0 / torch.pi),
-            "gripper_distance": gripper_distance,
-            "bottle_lift_delta": bottle_lift_delta,
-            "near_gripper": near_gripper,
-            "held": held,
-            "mouth_xy_distance": mouth_xy_distance,
-            "mouth_height_delta": mouth_height_delta,
-            "mouth_axis_dot": mouth_axis_dot,
-            "relative_pose_valid": relative_pose_valid,
-            "cup_fall": cup_fall,
-            "pouring_now": pouring_now,
-            "grasp_started": self._grasp_started,
-            "grasp_lost": self._grasp_lost,
-            "pouring_started": self._pouring_started,
-            "returned_upright": returned_upright,
-            "success": success,
-        }
-        self._last_success_metrics = metrics
-        return success, cup_fall, metrics
+        return success, cup_fall, {}
     
     
     def is_task_success(self, **kwargs) -> torch.Tensor:
