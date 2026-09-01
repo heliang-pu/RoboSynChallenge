@@ -780,6 +780,11 @@ def run_parallel_episodes(
 def create_eval_run_dir(config):
     """Create the shared directory for metrics and optional videos."""
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    # 多分片并发启动时同一秒内会撞目录名,后写的分片会覆盖先写的
+    # evaluation_metrics.json(实测 item_assembly 4 分片只剩 3 份),带上分片号。
+    num_shards = int(config.get("num_shards", 1) or 1)
+    if num_shards > 1:
+        timestamp += f"_s{int(config.get('shard_index', 0) or 0)}"
     save_root = Path(config.get("eval_result_dir") or "eval_result")
     checkpoint_path = config.get("checkpoint_path")
     model_name = config.get("model_name")

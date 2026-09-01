@@ -131,3 +131,11 @@ python scripts/eval_policy.py --config policy/act/deploy_policy.yml \
   3.45/2.84/1.67 env-steps/s）是病态路径下的数据，**作废**；`cuda:0` 下的 N 曲线待重测。
 - 多卡机每个进程要同时设 `--gpu_id i` 与 `EMBODICHAIN_RENDER_GPU_ID=i`
   （Vulkan 不认 `CUDA_VISIBLE_DEVICES`）。
+
+## 补记：`env.close()` 终止进程是引擎的有意行为
+
+DexSim 在 `env.close()` → `sim.destroy()` 时直接退出进程，开关是环境变量
+**`EMBODICHAIN_SIM_EXIT_PROCESS`**（设 `0` 则不退出，改为把清理排队，
+由顶层 `SimulationManager.flush_cleanup_queue()` 执行——origin/main 的
+`scripts/run_env.py` 已按此写法收尾）。本分支把指标落盘挪到 close 之前的修复
+与之兼容：不设该变量时进程在落盘后退出，设了也能正常返回。
