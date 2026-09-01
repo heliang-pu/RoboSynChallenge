@@ -13,19 +13,19 @@
 
 > **分支导航** — 本仓库按主题分支开发，每个分支的说明就在各自 README 的这个位置。
 >
-> [`main`](../../tree/main) 基线 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · **`feat/lila-wam`（当前）** LiLa-WAM 与覆盖度采集 · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练
+> [`main`](../../tree/main) 基线 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · [`feat/lila-wam`](../../tree/feat/lila-wam) LiLa-WAM 与覆盖度采集 · **`feat/lerobot-pi05-mem`（当前）** LeRobot pi0.5 与 MEM · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练
 
-## 本分支：`feat/lila-wam` — LiLa-WAM 接入与随机化覆盖度采集
+## 本分支：`feat/lerobot-pi05-mem` — LeRobot pi0.5（PyTorch）与 MEM 观测记忆
 
-基于 [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05)，领先 `main` 最多，是当前的主力开发分支。
+基于 [`feat/lila-wam`](../../tree/feat/lila-wam)，把 HuggingFace LeRobot 的 pi0.5 PyTorch 实现接成第二套 pi0.5 集成（`policy/pi05_lerobot/`），与既有的 openpi/JAX 版 `policy/pi05` 并存，可在同一任务同一 setting 下直接对比。
 
-- **LiLa-WAM 策略**：上游以 submodule 引入，附 deploy 入口、训练脚本、帧缓存、norm stats 与任务条件预计算（`policy/lila_wam/`，说明见 `docs/tutorials/policy/lila_wam.md`）
-- **随机化覆盖度**：`scripts/analyze_random_coverage.py` 统计官方 random 配置的实际覆盖，`scripts/build_coverage_configs.py` 据此生成 93 组收窄范围的采集配置（分层补匀 + 缺口补采），产物在 `configs/<task>/coverage_*/`
-- **约束随机化**：`randomize_rigid_object_pair_pose_constrained` 按 mesh 半尺寸保证成对物体的最小 xy 间隙；配套 6 个**直接调用生产判定函数**而非另写一份实现的测试
-- **数据流水线**：种子化采集、v3.0→v2.1 转换、多视角质检、官方与自采数据合并（`scripts/`、`launch/`）
-- **DM0.5 海光 DCU**：批大小探测、微调入口、checkpoint 回传与看门狗（`policy/dm05/`）
+- **跟最新上游**：锁定含 MEM 的 upstream commit（huggingface/lerobot#4076，短时程视觉与本体观测记忆），`setup_lerobot.sh` 会拒绝没有 `policies/pi05/memory.py` 的版本
+- **MEM 决定执行节奏**：MEM 的历史环形缓冲每次策略调用只入队一帧，只有「每个环境步喂一次」才与训练一致。因此 eval 有 `per_step` / `chunk` 两种模式，带 MEM 的 checkpoint 默认走 `per_step`（实测 12 个环境步：`per_step` 喂满 12 帧，`chunk` 只喂 3 帧）
+- **stride 跟数据集帧率**：`memory_stride` 以数据集帧计，本仓库数据 25fps 而上游默认 30，`finetune.sh` 直接从 `meta/info.json` 读 fps
+- **独立 worker 进程**：LeRobot 要求 Python ≥3.12 与 transformers v5，仿真环境通常给不了，策略跑在子进程里经 stdio JSON 通信
+- **老 checkpoint 迁移**：过期 config 字段与写死的 tokenizer 路径这两类坑有现成解法，见策略 README
 
-> 覆盖度配置的生成输入 `report/coverage/` 属本地产物不入库，因此生成的配置一并提交，否则 clone 后无法复现。
+> 说明见 `policy/pi05_lerobot/README.md` 与 `docs/tutorials/policy/pi05_lerobot.md`。
 
 ---
 
@@ -54,7 +54,8 @@ RoboSynChallenge 是基于 [EmbodiChain](https://dexforce.github.io/EmbodiChain/
 
 - **10 个双臂操作任务**的仿真环境与专家轨迹生成器(按低/中/高三档难度分级);
 - **数据采集流水线**:专家演示 → LeRobot 数据集(v3.0/v2.1)→ 多重校验门 → 训练就绪;
-- **9 个策略的训练/部署集成**:ACT、Diffusion Policy、pi0、pi0.5、DM0.5、G0.5、Motus、XR-1、LiLa-WAM,
+- **10 个策略的训练/部署集成**:ACT、Diffusion Policy、pi0、pi0.5(openpi/JAX 与 LeRobot/torch 各一套)、
+  DM0.5、G0.5、Motus、XR-1、LiLa-WAM,
   统一评估接口,任何策略实现 `deploy_policy.py` 即可接入;
 - **标准化评估协议**:clear / random / random_3p 三种设置,固定判据与随机种子,结果可复现。
 
@@ -297,6 +298,7 @@ cd policy/dm05 && bash eval.sh <task_name> <setting> ...
 | Diffusion Policy | 扩散策略 | LeRobot / torch | ~10 GB | uv(policy/dp) |
 | pi0 | VLA(PaliGemma 3B + action expert) | openpi / JAX | 全量 ~80 GB,可调小 batch | uv(policy/pi0) |
 | pi0.5 | VLA(pi0 升级版,开放世界泛化) | openpi / JAX | 全量 ~80 GB,可调小 batch | uv(policy/pi05) |
+| pi0.5 (LeRobot) | 同上的 PyTorch 移植,带 MEM 观测记忆 | LeRobot / torch | 单卡 48 GB(bf16 + 梯度检查点) | 独立 Python(见 policy/pi05_lerobot) |
 | DM0.5 | VLA(服务式推理) | OpenDM / torch | 多卡 SFT | conda(见 policy/dm05) |
 | G0.5 | VLA(2B VLM + action expert) | GalaxeaVLA / torch | >70 GB/卡,官方 8 卡 | venv(见 policy/g05) |
 | Motus | VLA(视频生成先验) | Motus / DeepSpeed | >80 GB/卡 | venv(见 policy/motus) |

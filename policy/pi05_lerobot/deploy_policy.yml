@@ -1,0 +1,60 @@
+# LeRobot PI0.5 (PyTorch) Policy Evaluation Configuration
+#
+# This is the LeRobot `PI05Policy` port. The JAX openpi pi0.5 lives in
+# policy/pi05 and keeps its own config.
+
+policy_name: pi05_lerobot
+task_name: click_bell
+setting: clear
+model_name: pi05_lerobot
+seed: 0
+max_episodes: 1
+max_steps: 1000
+headless: true
+device: cpu
+renderer: auto
+gpu_id: 0
+pytorch_device: cuda
+num_envs: 1
+filter_dataset_saving: true
+eval_video_log: false
+eval_video_obs_key: cam_high
+
+# eval.sh supplies checkpoint_dir from its third argument. A checkpoint step
+# directory containing pretrained_model/ is also accepted.
+checkpoint_dir: ""
+# Optional. If empty, the worker imports the installed lerobot package. You can
+# also set PI05_LEROBOT_ROOT or pass --lerobot_root policy/pi05_lerobot/lerobot.
+lerobot_root: ""
+# Optional. If empty, eval uses PI05_LEROBOT_PYTHON or the current eval Python.
+pi05_lerobot_python: ""
+pi05_lerobot_cuda_visible_devices: 0
+
+# Env steps executed per planning cycle, and the policy's replan cadence
+# (n_action_steps) the worker overrides the checkpoint with. 10 matches the
+# openpi pi0.5 baseline in policy/pi05: 50-step open-loop execution scored 0/19
+# on item_assembly.
+pi05_lerobot_steps: 10
+
+# auto     -> per_step when the checkpoint enables MEM, chunk otherwise
+# per_step -> one observation per env step, like lerobot-eval. MEM history then
+#             lines up with the delta_indices used during training.
+# chunk    -> one chunk sampled per cycle, like the openpi adapter. Cheaper, but
+#             it starves MEM of intermediate frames.
+pi05_lerobot_step_mode: auto
+
+# MEM stride is counted in dataset frames, so it must track the training fps.
+# RoboSynChallenge datasets are 25 fps; upstream defaults to 30 (LeRobot's usual
+# recording rate). 0 keeps whatever the checkpoint was trained with — set this
+# only to correct a checkpoint whose stride does not match its dataset.
+pi05_lerobot_memory_stride: 0
+
+pi05_lerobot_rescale_gripper: auto
+pi05_lerobot_gripper_indices: [6, 13]
+pi05_lerobot_gripper_source_range: [0.0, 1.0]
+
+# Override the tokenizer baked into the checkpoint's preprocessor. Checkpoints
+# trained on another machine often store an absolute path that does not resolve
+# here; "google/paligemma-3b-pt-224" is the stock PI0.5 tokenizer. Empty keeps
+# whatever the checkpoint saved.
+pi05_lerobot_tokenizer: ""

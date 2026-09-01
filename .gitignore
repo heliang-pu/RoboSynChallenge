@@ -213,6 +213,10 @@ __marimo__/
 # 本地数据、评估结果与训练运行产物（体积大 / 可重新生成）
 *.mp4
 lerobot_dataset/
+
+# LeRobot source checkouts created by policy/*/setup_lerobot.sh
+policy/smolvla/lerobot/
+policy/pi05_lerobot/lerobot/
 training_data/
 eval_result/
 /report/
