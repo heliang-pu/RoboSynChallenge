@@ -17,8 +17,6 @@
 """Script to run the environment."""
 
 import argparse
-import sys
-import traceback
 import torch
 import numpy as np
 import tqdm
@@ -43,14 +41,6 @@ gym_utils.DEFAULT_MANAGER_MODULES = gym_utils.DEFAULT_MANAGER_MODULES + [
 ]
 
 
-def _report_value(value):
-    if isinstance(value, torch.Tensor):
-        return value.detach().to(device="cpu").tolist()
-    if isinstance(value, dict):
-        return {key: _report_value(item) for key, item in value.items()}
-    return value
-
-
 def _generate_function(
     env,
     num_traj,
@@ -59,36 +49,17 @@ def _generate_function(
     save_video: bool = False,
     debug_mode: bool = False,
     reset_first: bool = True,
-    report_task_success: bool = False,
     **kwargs,
 ) -> bool:
     valid = True
     if reset_first:
         _, _ = env.reset()
 
-    max_invalid_streak = int(kwargs.pop("max_invalid_streak", 0) or 0)
-    invalid_counter = kwargs.pop("invalid_counter", None)
-    invalid_streak = 0
     while True:
         for trajectory_idx in range(num_traj):
             valid = generate_and_execute_action_list(
                 env, trajectory_idx, debug_mode, **kwargs
             )
-
-            if valid and report_task_success:
-                success = env.unwrapped.is_task_success().detach().to(device="cpu")
-                log_info(
-                    f"Success condition after expert rollout: {success.tolist()}",
-                    color="green" if bool(success.all()) else "yellow",
-                )
-                metrics = getattr(env.unwrapped, "_last_success_metrics", None)
-                evaluator = getattr(env.unwrapped, "_evaluate_task_state", None)
-                if metrics is None and evaluator is not None:
-                    evaluated = evaluator()
-                    if isinstance(evaluated, tuple) and len(evaluated) >= 3:
-                        metrics = evaluated[2]
-                if metrics:
-                    log_info(f"Success metrics: {_report_value(metrics)}")
 
             if not valid:
                 _, _ = env.reset(options={"save_data": False})
@@ -96,16 +67,6 @@ def _generate_function(
 
         if valid:
             break
-
-        invalid_streak += 1
-        if invalid_counter is not None:
-            invalid_counter[0] += 1
-        if max_invalid_streak and invalid_streak >= max_invalid_streak:
-            log_warning(
-                f"{invalid_streak} consecutive invalid generations; region looks "
-                "kinematically infeasible for the scripted expert."
-            )
-            return False
 
         log_warning("Reset valid flag to True.")
         valid = True
@@ -159,29 +120,11 @@ def _generate_until_saved_episode_target(args, env, gym_config, num_traj: int) -
         unit="episode",
     )
 
-    max_attempts = int(getattr(args, "max_generation_attempts", 0) or 0)
-    invalid_total = [0]
     while saved_episodes < target_episodes:
-        if max_attempts and saved_episodes == 0 and invalid_total[0] >= 300:
-            log_warning(
-                f"{invalid_total[0]} total invalid generations with zero successes; "
-                "region infeasible for the scripted expert."
-            )
-            sys.exit(3)
-        zero_cap = min(60, max_attempts) if max_attempts else 0
-        if zero_cap and saved_episodes == 0 and attempt >= zero_cap:
-            log_warning(f"No successful episode in the first {attempt} attempts; giving up this region.")
-            sys.exit(3)
-        if max_attempts and attempt >= max_attempts:
-            log_warning(
-                f"Giving up after {attempt} attempts with "
-                f"{saved_episodes}/{target_episodes} episodes saved."
-            )
-            sys.exit(3)
         attempt += 1
         previous_saved_episodes = saved_episodes
 
-        hopeful = _generate_function(
+        _generate_function(
             env,
             num_traj,
             attempt - 1,
@@ -190,49 +133,11 @@ def _generate_until_saved_episode_target(args, env, gym_config, num_traj: int) -
             debug_mode=getattr(args, "debug_mode", False),
             reset_first=False,
             regenerate=getattr(args, "regenerate", False),
-            report_task_success=getattr(args, "report_task_success", False),
-            max_invalid_streak=(100 if max_attempts else 0),
-            invalid_counter=invalid_total,
         )
-        if not hopeful:
-            log_warning("Aborting this region (planner cannot reach it).")
-            sys.exit(3)
 
         saved_before_reset = _get_saved_episode_count(env)
-        save_this_episode = saved_before_reset < target_episodes
-        settle = int(getattr(args, "success_settle_steps", 0) or 0)
-        if save_this_episode and settle > 0:
-            # 自适应静置:官方判定要求连续 success_stable_steps 步稳定,而边缘插入在
-            # 松爪后仍会滑落/减速一段时间。每 5 步查一次判定,成功即停,最多 settle 步。
-            try:
-                robot = env.unwrapped.robot
-                hold = robot.get_qpos()[:, env.unwrapped.active_joint_ids]
-                stepped = 0
-                while stepped < settle:
-                    for _ in range(min(5, settle - stepped)):
-                        env.step(hold)
-                        stepped += 1
-                    if bool(env.unwrapped.is_task_success().detach().reshape(-1)[0].item()):
-                        break
-            except Exception as exc:
-                log_warning(f"Settle steps failed ({exc}); judging without settle.")
-        if save_this_episode and getattr(args, "save_only_success", False):
-            official_success = bool(
-                env.unwrapped.is_task_success().detach().reshape(-1)[0].item()
-            )
-            if not official_success:
-                try:
-                    _, _, m = env.unwrapped._evaluate_task_state()
-                    detail = {k: _report_value(m[k]) for k in (
-                        "placement_ok_single_frame", "place_stable_count", "cube_xy_dist",
-                        "cube_vertical_angle", "cube_lin_vel_norm", "cube_to_left_eef_dist",
-                        "cube_to_right_eef_dist", "bottom_z_diff") if k in m}
-                    log_warning(f"Episode failed the official success check; discarding. post-settle: {detail}")
-                except Exception:
-                    log_warning("Episode failed the official success check; discarding.")
-                save_this_episode = False
         _, _ = env.reset(
-            options={"save_data": save_this_episode}
+            options={"save_data": saved_before_reset < target_episodes}
         )
         saved_episodes = _get_saved_episode_count(env)
 
@@ -287,11 +192,9 @@ def run_env_main(args, env, gym_config):
             save_video=getattr(args, "save_video", False),
             debug_mode=getattr(args, "debug_mode", False),
             regenerate=getattr(args, "regenerate", False),
-            report_task_success=getattr(args, "report_task_success", False),
         )
 
-    if not getattr(args, "report_task_success", False):
-        _, _ = env.reset()
+    _, _ = env.reset()
 
 
 if __name__ == "__main__":
@@ -319,45 +222,6 @@ if __name__ == "__main__":
         default="kinematic",
         help="Replay mode (default: kinematic).",
     )
-    parser.add_argument(
-        "--report_task_success",
-        action="store_true",
-        help="Log the task success predicate after each expert rollout.",
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=None,
-        help="Master seed for reproducible collection: every episode gets a "
-        "derived seed that is injected into env.reset() and recorded (with the "
-        "official success verdict, config hash and git commit) in an "
-        "episode_success.json sidecar next to the recorded dataset.",
-    )
-    parser.add_argument(
-        "--save_only_success",
-        action="store_true",
-        help="Only save episodes that pass the official task-success check, so "
-        "max_episodes counts successful episodes.",
-    )
-    parser.add_argument(
-        "--max_generation_attempts",
-        type=int,
-        default=0,
-        help="Give up (exit 3) if this many generation attempts pass without "
-        "reaching the episode target. 0 = unlimited (official behaviour). "
-        "Guards against kinematically infeasible randomization regions.",
-    )
-    parser.add_argument(
-        "--success_settle_steps",
-        type=int,
-        default=0,
-        help="Extra hold-position env steps after the expert action list ends, "
-        "before the success check. The official evaluator needs the placement "
-        "to hold for success_stable_steps consecutive steps, but expert scripts "
-        "end at the instant of release; a short settle (like the trailing steps "
-        "of an evaluation episode) lets the stability counter accumulate and "
-        "lets the object physically settle. 0 keeps official behaviour.",
-    )
 
     args = parser.parse_args()
 
@@ -383,20 +247,10 @@ if __name__ == "__main__":
 
     env = gym.make(id=gym_config["id"], cfg=env_cfg, **action_config)
 
-    if getattr(args, "seed", None) is not None:
-        from scripts.seeded_collection import SeededCollection
-
-        env = SeededCollection(
-            env, int(args.seed), gym_config,
-            gym_config_path=getattr(args, "gym_config", None),
-        )
-        log_info(f"Seeded collection enabled (master seed {args.seed}).", color="green")
-
     try:
         run_env_main(args, env, gym_config=gym_config)
     except Exception as e:
         log_warning(f"An error occurred during environment execution: {e}")
-        traceback.print_exc()
     finally:
         # Always close before Python interpreter shutdown. Native dexsim, Warp,
         # CUDA, and renderer resources have an unsafe destructor order during

@@ -15,7 +15,7 @@ The integration notes (design decisions, differences from upstream, FAQ) live in
 ```bash
 git submodule update --init policy/lila_wam/LiLa-WAM
 bash policy/lila_wam/setup_env.sh --download-encoder   # training env + DINOv3 weights
-bash policy/lila_wam/setup_env.sh --with-sim           # add the EmbodiChain eval stack
+uv pip install --python .venv/bin/python "transformers>=4.56,<5" omegaconf   # eval: the repo-root venv already has EmbodiChain
 ```
 
 The DINOv3 checkpoint is gated on HuggingFace: accept the license at

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Resumable PRO-6000 evaluation queue:
-# every 2.5k checkpoint x H={10,30,50,64} x 10 tasks x 20 paired episodes.
+# every 2.5k checkpoint x H={10,50} x 10 tasks x 20 paired episodes.
 set -uo pipefail
 
 repo="${ALL10_EVAL_REPO:-/workspace/shared/RoboSynChallenge-eval-all10}"
@@ -31,7 +31,7 @@ tasks=(
     click_bell drawer_open_place handle_basket item_assembly items_handover
     manipulate_pipette mixer_operating sample_loading table_rearrangement water_pouring
 )
-horizons=(10 30 50 64)
+horizons=(10 50)
 expected_steps=()
 for ((expected_step=2500; expected_step<expected_final_step; expected_step+=2500)); do
     expected_steps+=("$expected_step")
@@ -448,7 +448,7 @@ write_manifest() {
     # The shared results directory may be mounted at a different local path on
     # each host.  Preserve the first authoritative manifest instead of letting
     # later workers rewrite it with host-local paths or worker counts. Rewrite
-    # only when the terminal checkpoint contract itself has changed.
+    # only when the terminal checkpoint or selected-horizon contract changed.
     if [[ -f "$results_root/manifest.json" ]] && "$python_bin" - \
         "$results_root/manifest.json" "$expected_final_step" <<'PY'
 import json, sys
@@ -456,7 +456,11 @@ try:
     manifest = json.load(open(sys.argv[1], encoding="utf-8"))
 except (OSError, ValueError):
     raise SystemExit(1)
-raise SystemExit(0 if manifest.get("expected_final_step") == int(sys.argv[2]) else 1)
+unchanged = (
+    manifest.get("expected_final_step") == int(sys.argv[2])
+    and manifest.get("execution_horizons") == [10, 50]
+)
+raise SystemExit(0 if unchanged else 1)
 PY
     then
         return 0
@@ -479,7 +483,7 @@ payload = {
     "expected_final_step": expected_final_step,
     "expected_checkpoints": expected_checkpoints,
     "tasks": "click_bell drawer_open_place handle_basket item_assembly items_handover manipulate_pipette mixer_operating sample_loading table_rearrangement water_pouring".split(),
-    "execution_horizons": [10, 30, 50, 64],
+    "execution_horizons": [10, 50],
     "episodes_per_job": int(episodes),
     "paired_seed_base": 832500,
     "paired_seed_task_stride": 1000,
@@ -499,7 +503,7 @@ PY
 
 main() {
     [[ -x "$python_bin" ]] || { echo "python missing: $python_bin" >&2; exit 2; }
-    [[ -f "$repo/scripts/eval_policy.py" ]] || { echo "repo incomplete: $repo" >&2; exit 2; }
+    [[ -f "$repo/scripts/eval_policy_parallel.py" ]] || { echo "repo incomplete: $repo" >&2; exit 2; }
     [[ "$worker_count" =~ ^[1-9][0-9]*$ ]] || { echo "invalid workers: $worker_count" >&2; exit 2; }
     mkdir -p "${ALL10_EVAL_JAX_CACHE:-/workspace/shared/.cache/jax-all10-eval}" "$cache_root"
     write_manifest

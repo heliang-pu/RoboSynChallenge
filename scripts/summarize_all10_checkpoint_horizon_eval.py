@@ -25,7 +25,7 @@ DEFAULT_TASKS = (
     "table_rearrangement",
     "water_pouring",
 )
-DEFAULT_HORIZONS = (10, 30, 50, 64)
+DEFAULT_HORIZONS = (10, 50)
 DEFAULT_PROTOCOL_REVISION = "all10_h64_v2_bounded_texture_pool"
 
 
@@ -249,7 +249,7 @@ def build_selection(
             "episodes_per_task_required": expected_episodes,
             "videos_per_task_required": expected_episodes,
             "horizons_required_for_checkpoint_ranking": list(DEFAULT_HORIZONS),
-            "rule": "A checkpoint x H candidate requires all 10 tasks. A checkpoint weight requires all four H values.",
+            "rule": "A checkpoint x H candidate requires all 10 tasks. A checkpoint weight requires both selected H values.",
         },
         "progress": {
             "expected_job_count": len(expected_keys),
@@ -288,7 +288,7 @@ def render_selection_markdown(selection: dict) -> list[str]:
     progress = selection["progress"]
     lines += [
         f"- 选择状态：**{status}**。只有完成全部 10 个任务各 20 局的 checkpoint×H 才进入候选榜。",
-        f"- 可比较 checkpoint×H：{progress['eligible_checkpoint_horizon_count']}；四个 H 全完成的权重：{progress['fully_complete_checkpoint_count']}。",
+        f"- 可比较 checkpoint×H：{progress['eligible_checkpoint_horizon_count']}；两个 H 全完成的权重：{progress['fully_complete_checkpoint_count']}。",
         f"- 总任务组合进度：{progress['completed_expected_job_count']}/{progress['expected_job_count']}。",
     ]
     if status != "final":
@@ -315,14 +315,14 @@ def render_selection_markdown(selection: dict) -> list[str]:
     best_checkpoint = selection["best_checkpoint_weight"]
     best_horizon = selection["best_execution_horizon"]
     lines.append(
-        "- 最佳权重：**待定（尚无权重完成四个 H）**。"
+        "- 最佳权重：**待定（尚无权重完成两个 H）**。"
         if best_checkpoint is None
         else "- 当前最佳权重：checkpoint **{}**，其最佳 H={}。".format(
             best_checkpoint["checkpoint"], best_checkpoint["best_execution_horizon"]
         )
     )
     lines.append(
-        "- 最佳 H：**待定（尚无同一批完整权重可公平比较四个 H）**。"
+        "- 最佳 H：**待定（尚无同一批完整权重可公平比较两个 H）**。"
         if best_horizon is None
         else "- 当前跨完整权重最佳 H：**{}**，{}。".format(
             best_horizon["execution_horizon"],
@@ -433,7 +433,7 @@ def render_markdown(
         "",
         f"- 协议版本：`{protocol_revision}`。",
         f"- 任务：{len(DEFAULT_TASKS)} 个，每个组合 {expected_episodes} 局。",
-        "- 执行 horizon：`10、30、50、64`；模型动作 horizon 固定为 64。",
+        "- 执行 horizon：`10、50`；模型动作 horizon 固定为 64。",
         "- 固定配对 seed：同一任务在所有 checkpoint/horizon 下使用相同 20 个场景。",
         "- 视频：每局一个 2560×480 四视角横向拼接 MP4，依次为左腕、右腕、顶部、全局第三视角。",
         "- setting：`random_3p`；成功由任务正式评估器判定。",
@@ -452,8 +452,8 @@ def render_markdown(
         "",
         "## Checkpoint × horizon 汇总",
         "",
-        "| checkpoint | H=10 | H=30 | H=50 | H=64 | 完整任务数 |",
-        "|---:|---:|---:|---:|---:|---:|",
+        "| checkpoint | H=10 | H=50 | 完整任务数 |",
+        "|---:|---:|---:|---:|",
     ]
 
     for checkpoint in checkpoints:
@@ -469,14 +469,17 @@ def render_markdown(
             count = sum(int(item["episode_count"]) for item in items)
             task_jobs += len(items)
             cells.append(rate(success, count))
-        lines.append(f"| {checkpoint} | {' | '.join(cells)} | {task_jobs}/40 |")
+        lines.append(
+            f"| {checkpoint} | {' | '.join(cells)} | "
+            f"{task_jobs}/{len(DEFAULT_HORIZONS) * len(DEFAULT_TASKS)} |"
+        )
 
     for checkpoint in checkpoints:
         if not any(key[0] == checkpoint for key in results):
             continue
         lines += ["", f"## Checkpoint {checkpoint} 分任务结果", ""]
-        header = "| task | H=10 | H=30 | H=50 | H=64 |"
-        lines += [header, "|---|---:|---:|---:|---:|"]
+        header = "| task | H=10 | H=50 |"
+        lines += [header, "|---|---:|---:|"]
         for task in DEFAULT_TASKS:
             cells = []
             for horizon in DEFAULT_HORIZONS:
@@ -510,6 +513,11 @@ def main() -> None:
     results, errors = load_results(
         args.results_root, args.expected_episodes, args.protocol_revision
     )
+    # Preserve legacy H=30/H=64 artifacts on disk while excluding them from
+    # the narrowed H=10/H=50 sweep, progress, CSV, rankings, and final gate.
+    results = {
+        key: payload for key, payload in results.items() if key[1] in DEFAULT_HORIZONS
+    }
     selection = build_selection(
         checkpoints,
         expected_checkpoints,

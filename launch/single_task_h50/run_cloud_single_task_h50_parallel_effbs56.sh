@@ -11,28 +11,28 @@ repo=${ROBOSYN_REPO_ROOT:-/root/code/RoboSynChallenge}
 pi05="$repo/policy/pi05"
 data_home=${ROBOSYN_HF_LEROBOT_HOME:-/tmp/pi05/training_data}
 base=${ROBOSYN_SINGLE_BASE:-/tmp/pi05/base_weights/all10_h64_67500}
-checkpoint_root=${ROBOSYN_SINGLE_CHECKPOINT_ROOT:-/tmp/pi05/single_task_h50_effbs56_checkpoints}
-status_root=${ROBOSYN_SINGLE_STATUS_ROOT:-/tmp/pi05/single_task_h50_effbs56_status}
-log_root=${ROBOSYN_SINGLE_LOG_ROOT:-/tmp/pi05/logs/single_task_h50_from_all10_67500_effbs56_2ep}
-smoke_root=${ROBOSYN_SINGLE_SMOKE_ROOT:-/tmp/pi05/single_task_h50_effbs56_smoke}
-exp_prefix=${ROBOSYN_SINGLE_EXP_PREFIX:-from_all10_67500_h50_merged_effbs56_2ep}
+checkpoint_root=${ROBOSYN_SINGLE_CHECKPOINT_ROOT:-/tmp/pi05/single_task_h50_effbs56_frozenvlm_v6_checkpoints}
+status_root=${ROBOSYN_SINGLE_STATUS_ROOT:-/tmp/pi05/single_task_h50_effbs56_frozenvlm_v6_status}
+log_root=${ROBOSYN_SINGLE_LOG_ROOT:-/tmp/pi05/logs/single_task_h50_from_all10_67500_effbs56_frozenvlm_v6_2ep}
+smoke_root=${ROBOSYN_SINGLE_SMOKE_ROOT:-/tmp/pi05/single_task_h50_effbs56_frozenvlm_v6_smoke}
+exp_prefix=${ROBOSYN_SINGLE_EXP_PREFIX:-from_all10_67500_h50_merged_effbs56_frozenvlm_v6_2ep}
 effective_batch=${ROBOSYN_SINGLE_EFFECTIVE_BATCH_SIZE:-56}
 epochs=${ROBOSYN_SINGLE_EPOCHS:-2}
 workers=${ROBOSYN_SINGLE_NUM_WORKERS:-4}
 stagger_seconds=${ROBOSYN_SINGLE_STAGGER_SECONDS:-90}
-micro_candidates=${ROBOSYN_SINGLE_MICRO_BATCH_CANDIDATES:-"4 2 1"}
+micro_candidates=${ROBOSYN_SINGLE_MICRO_BATCH_CANDIDATES:-"8 7 4 2 1"}
 
 tasks=(
-    click_bell
     drawer_open_place
     handle_basket
-    item_assembly
-    items_handover
-    manipulate_pipette
-    mixer_operating
     sample_loading
-    table_rearrangement
+    items_handover
+    mixer_operating
+    manipulate_pipette
+    item_assembly
     water_pouring
+    table_rearrangement
+    click_bell
 )
 
 mkdir -p "$checkpoint_root" "$status_root" "$log_root" "$smoke_root" /tmp/pi05/wandb_single_h50_effbs56
@@ -40,18 +40,6 @@ exec >>"$log_root/queue.log" 2>&1
 
 log() {
     echo "[$(date -Is)] $*"
-}
-
-cleanup_orphan_workers() {
-    local pid parent
-    for pid in $(pgrep -f "[m]ultiprocessing.spawn import spawn_main" 2>/dev/null); do
-        parent=$(ps -o ppid= -p "$pid" | tr -d ' ')
-        test "$parent" = 1 && kill -TERM "$pid" 2>/dev/null || true
-    done
-    for pid in $(pgrep -f "[m]ultiprocessing.resource_tracker import main" 2>/dev/null); do
-        parent=$(ps -o ppid= -p "$pid" | tr -d ' ')
-        test "$parent" = 1 && kill -TERM "$pid" 2>/dev/null || true
-    done
 }
 
 test "$effective_batch" -eq 56 || { log "effective batch must be 56"; exit 2; }
@@ -76,20 +64,26 @@ fi
 
 probe_accumulation() {
     local marker="$status_root/ACCUMULATION_SMOKE_OK" micro accumulation smoke_exp smoke_log smoke_steps rc
+    local MICRO_BATCH_SIZE=0 ACCUMULATION_STEPS=0 EFFECTIVE_BATCH_SIZE=0
+    local ACCUMULATOR_DTYPE='' FREEZE_MODE=''
     if test -f "$marker"; then
         # shellcheck disable=SC1090
         source "$marker"
-        test "$EFFECTIVE_BATCH_SIZE" -eq 56
-        test "$MICRO_BATCH_SIZE" -gt 0
-        test "$ACCUMULATION_STEPS" -gt 0
-        test $((MICRO_BATCH_SIZE * ACCUMULATION_STEPS)) -eq 56
-        micro_batch=$MICRO_BATCH_SIZE
-        accumulation_steps=$ACCUMULATION_STEPS
-        log "reusing accumulation smoke result micro=$micro_batch accumulation=$accumulation_steps"
-        return 0
+        if test "$EFFECTIVE_BATCH_SIZE" -eq 56 \
+            && test "$MICRO_BATCH_SIZE" -gt 0 \
+            && test "$ACCUMULATION_STEPS" -gt 0 \
+            && test $((MICRO_BATCH_SIZE * ACCUMULATION_STEPS)) -eq 56 \
+            && test "$ACCUMULATOR_DTYPE" = float32 \
+            && test "$FREEZE_MODE" = vlm; then
+            micro_batch=$MICRO_BATCH_SIZE
+            accumulation_steps=$ACCUMULATION_STEPS
+            log "reusing accumulation smoke result micro=$micro_batch accumulation=$accumulation_steps"
+            return 0
+        fi
+        log "invalid accumulation smoke marker; stopping for review: $marker"
+        return 1
     fi
 
-    cleanup_orphan_workers
     for micro in $micro_candidates; do
         test $((effective_batch % micro)) -eq 0 || continue
         accumulation=$((effective_batch / micro))
@@ -104,10 +98,12 @@ probe_accumulation() {
             export LD_PRELOAD=/opt/mpi/lib/libmpi.so
             export PYTHONPATH="$pi05/src:$pi05/packages/openpi-client/src"
             export OMP_NUM_THREADS=16
-            export XLA_PYTHON_CLIENT_MEM_FRACTION=0.96
+            export XLA_PYTHON_CLIENT_MEM_FRACTION=0.95
             export WANDB_MODE=disabled
             export OPENPI_GRADIENT_ACCUMULATION_STEPS="$accumulation"
             export OPENPI_EFFECTIVE_BATCH_SIZE="$effective_batch"
+            export OPENPI_ACCUMULATOR_DTYPE=float32
+            export OPENPI_FREEZE_MODE=vlm
             export OPENPI_FIRST_SAVE_UPDATE=1
             export OPENPI_SAVE_EVERY_UPDATES=1
             export OPENPI_SMOKE_NO_CHECKPOINT=1
@@ -122,7 +118,7 @@ probe_accumulation() {
                 --checkpoint-base-dir="$smoke_root" \
                 --num-train-steps="$smoke_steps" \
                 --batch-size="$micro" \
-                --num-workers=2 \
+                --num-workers=0 \
                 --fsdp-devices=1 \
                 --ema-decay=None \
                 --save-interval=1 \
@@ -133,19 +129,17 @@ probe_accumulation() {
                 --lr-schedule.decay-lr=1e-6
         ) >>"$smoke_log" 2>&1
         rc=$?
-        if test "$rc" -eq 0 \
+        if { test "$rc" -eq 0 || test "$rc" -eq 139; } \
             && grep -q "optimizer_update=2/2" "$smoke_log" \
-            && ! grep -qE "OutOfMemory|RESOURCE_EXHAUSTED|Traceback" "$smoke_log"; then
-            printf 'MICRO_BATCH_SIZE=%s\nACCUMULATION_STEPS=%s\nEFFECTIVE_BATCH_SIZE=%s\nSMOKE_LOG=%q\nCOMPLETED_AT=%q\n' \
+            && ! grep -qE "OutOfMemory|RESOURCE_EXHAUSTED|XlaRuntimeError|ValueError" "$smoke_log"; then
+            printf 'MICRO_BATCH_SIZE=%s\nACCUMULATION_STEPS=%s\nEFFECTIVE_BATCH_SIZE=%s\nACCUMULATOR_DTYPE=float32\nFREEZE_MODE=vlm\nSMOKE_LOG=%q\nCOMPLETED_AT=%q\n' \
                 "$micro" "$accumulation" "$effective_batch" "$smoke_log" "$(date -Is)" >"$marker"
             micro_batch=$micro
             accumulation_steps=$accumulation
-            cleanup_orphan_workers
-            log "accumulation smoke passed micro=$micro_batch accumulation=$accumulation_steps"
+            log "accumulation smoke passed micro=$micro_batch accumulation=$accumulation_steps exit=$rc"
             return 0
         fi
         log "accumulation smoke failed micro=$micro accumulation=$accumulation exit=$rc"
-        cleanup_orphan_workers
         sleep 15
     done
     printf 'failed_at=%s\nreason=no_micro_batch_fit\n' "$(date -Is)" >"$status_root/QUEUE_FAILED"
@@ -154,7 +148,120 @@ probe_accumulation() {
 
 probe_accumulation || { log "no viable effective-BS56 accumulation plan"; exit 1; }
 
-printf 'started_at=%s\nexp_prefix=%s\nepochs=%s\neffective_batch_size=%s\nmicro_batch_size=%s\naccumulation_steps=%s\nbase=%s\n' \
+probe_checkpoint_resume() {
+    local marker="$status_root/CHECKPOINT_RESUME_SMOKE_OK"
+    local smoke_exp smoke_dir first_log resume_log first_steps final_steps final_step rc
+    if test -f "$marker"; then
+        log "reusing checkpoint/resume smoke result"
+        return 0
+    fi
+    smoke_exp="resume_smoke_effbs56_mb${micro_batch}x${accumulation_steps}_$(date +%s)"
+    smoke_dir="$smoke_root/pi05_click_bell/$smoke_exp"
+    first_log="$log_root/${smoke_exp}_save.log"
+    resume_log="$log_root/${smoke_exp}_resume.log"
+    first_steps=$((accumulation_steps * 2))
+    final_steps=$((accumulation_steps * 3))
+    final_step=$((final_steps - 1))
+    log "checkpoint/resume smoke starting exp=$smoke_exp"
+
+    (
+        export CUDA_VISIBLE_DEVICES=0
+        unset ROCR_VISIBLE_DEVICES HIP_VISIBLE_DEVICES
+        export HF_LEROBOT_HOME="$data_home"
+        export LD_PRELOAD=/opt/mpi/lib/libmpi.so
+        export PYTHONPATH="$pi05/src:$pi05/packages/openpi-client/src"
+        export OMP_NUM_THREADS=16
+        export XLA_PYTHON_CLIENT_MEM_FRACTION=0.95
+        export WANDB_MODE=disabled
+        export OPENPI_GRADIENT_ACCUMULATION_STEPS="$accumulation_steps"
+        export OPENPI_EFFECTIVE_BATCH_SIZE="$effective_batch"
+        export OPENPI_ACCUMULATOR_DTYPE=float32
+        export OPENPI_FREEZE_MODE=vlm
+        export OPENPI_FIRST_SAVE_UPDATE=1
+        export OPENPI_SAVE_EVERY_UPDATES=1
+        unset OPENPI_SMOKE_NO_CHECKPOINT
+        cd "$pi05" || exit 92
+        python3 scripts/train_accum.py pi05_click_bell \
+            --exp-name="$smoke_exp" \
+            --model.action-horizon=50 \
+            --weight-loader.params-path="$base/params" \
+            --data.repo-id=RoboSynChallenge/official_plus_seeded_clean_v21_click_bell \
+            --data.assets.assets-dir="$base/assets" \
+            --data.assets.asset-id=RoboSynChallenge/all10_expert_h64 \
+            --checkpoint-base-dir="$smoke_root" \
+            --num-train-steps="$first_steps" \
+            --batch-size="$micro_batch" \
+            --num-workers=0 \
+            --fsdp-devices=1 \
+            --ema-decay=None \
+            --save-interval=1 \
+            --keep-period=1 \
+            --lr-schedule.warmup-steps=1 \
+            --lr-schedule.peak-lr=1e-5 \
+            --lr-schedule.decay-steps=3 \
+            --lr-schedule.decay-lr=1e-6
+    ) >>"$first_log" 2>&1
+    rc=$?
+    if ! test -f "$smoke_dir/$((accumulation_steps - 1))/_CHECKPOINT_METADATA" \
+        || ! test -f "$smoke_dir/$((first_steps - 1))/params/manifest.ocdbt" \
+        || ! test -f "$smoke_dir/$((first_steps - 1))/train_state/manifest.ocdbt"; then
+        printf 'failed_at=%s\nreason=checkpoint_smoke_failed\nexit_code=%s\n' "$(date -Is)" "$rc" >"$status_root/QUEUE_FAILED"
+        return 1
+    fi
+
+    (
+        export CUDA_VISIBLE_DEVICES=0
+        unset ROCR_VISIBLE_DEVICES HIP_VISIBLE_DEVICES
+        export HF_LEROBOT_HOME="$data_home"
+        export LD_PRELOAD=/opt/mpi/lib/libmpi.so
+        export PYTHONPATH="$pi05/src:$pi05/packages/openpi-client/src"
+        export OMP_NUM_THREADS=16
+        export XLA_PYTHON_CLIENT_MEM_FRACTION=0.95
+        export WANDB_MODE=disabled
+        export OPENPI_GRADIENT_ACCUMULATION_STEPS="$accumulation_steps"
+        export OPENPI_EFFECTIVE_BATCH_SIZE="$effective_batch"
+        export OPENPI_ACCUMULATOR_DTYPE=float32
+        export OPENPI_FREEZE_MODE=vlm
+        export OPENPI_FIRST_SAVE_UPDATE=1
+        export OPENPI_SAVE_EVERY_UPDATES=1
+        unset OPENPI_SMOKE_NO_CHECKPOINT
+        cd "$pi05" || exit 92
+        python3 scripts/train_accum.py pi05_click_bell \
+            --exp-name="$smoke_exp" --resume \
+            --model.action-horizon=50 \
+            --weight-loader.params-path="$base/params" \
+            --data.repo-id=RoboSynChallenge/official_plus_seeded_clean_v21_click_bell \
+            --data.assets.assets-dir="$base/assets" \
+            --data.assets.asset-id=RoboSynChallenge/all10_expert_h64 \
+            --checkpoint-base-dir="$smoke_root" \
+            --num-train-steps="$final_steps" \
+            --batch-size="$micro_batch" \
+            --num-workers=0 \
+            --fsdp-devices=1 \
+            --ema-decay=None \
+            --save-interval=1 \
+            --keep-period=1 \
+            --lr-schedule.warmup-steps=1 \
+            --lr-schedule.peak-lr=1e-5 \
+            --lr-schedule.decay-steps=3 \
+            --lr-schedule.decay-lr=1e-6
+    ) >>"$resume_log" 2>&1
+    rc=$?
+    if ! grep -q "optimizer_update=3/3" "$resume_log" \
+        || ! test -f "$smoke_dir/$final_step/_CHECKPOINT_METADATA" \
+        || ! test -f "$smoke_dir/$final_step/params/manifest.ocdbt" \
+        || ! test -f "$smoke_dir/$final_step/train_state/manifest.ocdbt"; then
+        printf 'failed_at=%s\nreason=resume_smoke_failed\nexit_code=%s\n' "$(date -Is)" "$rc" >"$status_root/QUEUE_FAILED"
+        return 1
+    fi
+    printf 'completed_at=%s\nexp=%s\nfinal_step=%s\nsave_log=%q\nresume_log=%q\n' \
+        "$(date -Is)" "$smoke_exp" "$final_step" "$first_log" "$resume_log" >"$marker"
+    log "checkpoint/resume smoke passed through optimizer update 3"
+}
+
+probe_checkpoint_resume || { log "checkpoint/resume smoke failed"; exit 1; }
+
+printf 'started_at=%s\nexp_prefix=%s\nepochs=%s\neffective_batch_size=%s\nmicro_batch_size=%s\naccumulation_steps=%s\naccumulator_dtype=float32\nfreeze_mode=vlm\nbase=%s\n' \
     "$(date -Is)" "$exp_prefix" "$epochs" "$effective_batch" "$micro_batch" "$accumulation_steps" "$base" \
     >"$status_root/QUEUE_CONFIG"
 
@@ -180,13 +287,29 @@ run_task() {
         return 0
     fi
     if test -d "$checkpoint_dir"; then
-        latest=$(find "$checkpoint_dir" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null \
-            | awk '/^[0-9]+$/' | sort -n | tail -n 1)
-        if test -n "$latest" \
-            && test -f "$checkpoint_dir/$latest/_CHECKPOINT_METADATA" \
-            && test -f "$checkpoint_dir/$latest/train_state/manifest.ocdbt"; then
+        latest=$(
+            while IFS= read -r candidate; do
+                if test -f "$checkpoint_dir/$candidate/_CHECKPOINT_METADATA" \
+                    && test -f "$checkpoint_dir/$candidate/params/manifest.ocdbt" \
+                    && test -f "$checkpoint_dir/$candidate/train_state/manifest.ocdbt" \
+                    && ! find "$checkpoint_dir/$candidate" -name '.orbax-checkpoint-tmp-*' -print -quit | grep -q .; then
+                    echo "$candidate"
+                    break
+                fi
+            done < <(
+                find "$checkpoint_dir" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null \
+                    | awk '/^[0-9]+$/' | sort -rn
+            )
+        )
+        if test -n "$latest"; then
             mode=(--resume)
             log "resuming $task on GPU$gpu from micro_step=$latest"
+        elif ! find "$checkpoint_dir" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*' -print -quit | grep -q .; then
+            # OpenPI treats --resume on a directory with no numeric checkpoint
+            # as a fresh initialization while preserving the failed-run audit
+            # files. This handles interruption before the first update-100 save.
+            mode=(--resume)
+            log "restarting $task on GPU$gpu before its first checkpoint"
         else
             printf 'task=%s\ngpu=%s\nfailed_at=%s\nreason=existing_output_without_resumable_checkpoint\n' \
                 "$task" "$gpu" "$(date -Is)" >"$status_root/${task}.failed"
@@ -194,7 +317,7 @@ run_task() {
         fi
     fi
 
-    printf 'task=%s\ngpu=%s\nstarted_at=%s\nframes=%s\nepochs=%s\neffective_batch_size=%s\nmicro_batch_size=%s\naccumulation_steps=%s\noptimizer_updates=%s\nmicro_steps=%s\nfinal_step=%s\nlog=%s\n' \
+    printf 'task=%s\ngpu=%s\nstarted_at=%s\nframes=%s\nepochs=%s\neffective_batch_size=%s\nmicro_batch_size=%s\naccumulation_steps=%s\naccumulator_dtype=float32\nfreeze_mode=vlm\noptimizer_updates=%s\nmicro_steps=%s\nfinal_step=%s\nlog=%s\n' \
         "$task" "$gpu" "$(date -Is)" "$frames" "$epochs" "$effective_batch" "$micro_batch" \
         "$accumulation_steps" "$updates" "$micro_steps" "$final_step" "$task_log" \
         >"$status_root/${task}.running"
@@ -207,12 +330,14 @@ run_task() {
         export LD_PRELOAD=/opt/mpi/lib/libmpi.so
         export PYTHONPATH="$pi05/src:$pi05/packages/openpi-client/src"
         export OMP_NUM_THREADS=16
-        export XLA_PYTHON_CLIENT_MEM_FRACTION=0.96
+        export XLA_PYTHON_CLIENT_MEM_FRACTION=0.95
         export WANDB_MODE=online
         export WANDB_DIR=/tmp/pi05/wandb_single_h50_effbs56
         export WANDB_RUN_GROUP=single_task_h50_from_all10_67500_effbs56_2ep
         export OPENPI_GRADIENT_ACCUMULATION_STEPS="$accumulation_steps"
         export OPENPI_EFFECTIVE_BATCH_SIZE="$effective_batch"
+        export OPENPI_ACCUMULATOR_DTYPE=float32
+        export OPENPI_FREEZE_MODE=vlm
         export OPENPI_FIRST_SAVE_UPDATE=100
         export OPENPI_SAVE_EVERY_UPDATES="$save_every_updates"
         unset OPENPI_SMOKE_NO_CHECKPOINT
@@ -240,17 +365,19 @@ run_task() {
     ) >>"$task_log" 2>&1
     rc=$?
 
-    if test "$rc" -eq 0 \
-        && test -f "$checkpoint_dir/$final_step/_CHECKPOINT_METADATA" \
+    if test -f "$checkpoint_dir/$final_step/_CHECKPOINT_METADATA" \
         && test -f "$checkpoint_dir/$final_step/params/manifest.ocdbt" \
         && test -f "$checkpoint_dir/$final_step/train_state/manifest.ocdbt"; then
-        printf 'task=%s\ngpu=%s\ncompleted_at=%s\nframes=%s\nepochs=%s\neffective_batch_size=%s\nmicro_batch_size=%s\naccumulation_steps=%s\noptimizer_updates=%s\nmicro_steps=%s\nfinal_step=%s\ncheckpoint=%s\n' \
+        printf 'task=%s\ngpu=%s\ncompleted_at=%s\nframes=%s\nepochs=%s\neffective_batch_size=%s\nmicro_batch_size=%s\naccumulation_steps=%s\naccumulator_dtype=float32\nfreeze_mode=vlm\noptimizer_updates=%s\nmicro_steps=%s\nfinal_step=%s\ncheckpoint=%s\n' \
             "$task" "$gpu" "$(date -Is)" "$frames" "$epochs" "$effective_batch" "$micro_batch" \
             "$accumulation_steps" "$updates" "$micro_steps" "$final_step" "$checkpoint_dir/$final_step" \
             >"$status_root/${task}.done"
         rm -f "$status_root/${task}.running" "$status_root/${task}.failed"
-        log "completed $task on GPU$gpu"
+        log "completed $task on GPU$gpu final_checkpoint_verified exit=$rc"
         return 0
+    fi
+    if test "$rc" -eq 0; then
+        rc=93
     fi
     printf 'task=%s\ngpu=%s\nfailed_at=%s\nexit_code=%s\nlog=%s\n' \
         "$task" "$gpu" "$(date -Is)" "$rc" "$task_log" >"$status_root/${task}.failed"
@@ -296,6 +423,22 @@ while test "${#task_by_pid[@]}" -gt 0; do
     done
     sleep 15
 done
+
+if test "$failures" -eq 0; then
+    for task in "${tasks[@]}"; do
+        config="pi05_${task}"
+        exp="${exp_prefix}_${task}"
+        test -f "$status_root/${task}.done" || { failures=$((failures + 1)); break; }
+        final_step=$(awk -F= '$1=="final_step" {print $2}' "$status_root/${task}.done")
+        if ! test -n "$final_step" \
+            || ! test -f "$checkpoint_root/$config/$exp/$final_step/_CHECKPOINT_METADATA" \
+            || ! test -f "$checkpoint_root/$config/$exp/$final_step/params/manifest.ocdbt" \
+            || ! test -f "$checkpoint_root/$config/$exp/$final_step/train_state/manifest.ocdbt"; then
+            failures=$((failures + 1))
+            break
+        fi
+    done
+fi
 
 if test "$failures" -eq 0; then
     printf 'completed_at=%s\ntasks=%s\nepochs=%s\neffective_batch_size=%s\nmicro_batch_size=%s\naccumulation_steps=%s\n' \

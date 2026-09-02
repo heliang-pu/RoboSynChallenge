@@ -18,7 +18,7 @@ RoboSynChallenge：基于 EmbodiChain 的双臂（CobotMagic，14-DoF）操作�
 
 | 环境 | 位置 | 用途 |
 |---|---|---|
-| 仿真/采集/评估 | 仓库根 `.venv`（uv，Python 3.11 钉死，torch 2.10+cu128） | `scripts/run_env.py`、`scripts/eval_policy.py`、`launch/*.sh` |
+| 仿真/采集/评估 | 仓库根 `.venv`（uv，Python 3.11 钉死，torch 2.10+cu128） | `scripts/run_env_seeded.py`、`scripts/eval_policy_parallel.py`、`launch/*.sh` |
 | 策略训练 | `policy/{act,dp,pi0,pi05}/`（各自 pyproject + uv.lock，已提交） | `finetune.sh` 内部走 `uv run --frozen`，首次运行自动建环境 |
 | LeRobot pi0.5 | `policy/pi05_lerobot/`（uv，**Python 3.12**，lerobot 锁到含 MEM 的 git rev） | 上游要 3.12 而仿真侧钉 3.11，装不进同一解释器，所以没有 `sim` extra |
 | 重型策略 | `policy/{dm05,g05,motus,xr1,lila_wam}/` 的 `setup_env.sh` / README | 含 flash-attn、DeepSpeed 等自编译组件，不进 uv |
@@ -26,7 +26,7 @@ RoboSynChallenge：基于 EmbodiChain 的双臂（CobotMagic，14-DoF）操作�
 评估时两边碰头有两种手法，都是有意设计，不要「顺手修好」成正常安装：
 
 1. **把策略源码目录拼进 `PYTHONPATH` 而不是安装它**（见 `policy/pi05/eval.sh` 与
-   `scripts/eval_policy.py:add_policy_dependency_paths`），在仿真环境里直接调训练侧代码。
+   `scripts/eval_policy_parallel.py:add_policy_dependency_paths`），在仿真环境里直接调训练侧代码。
    适用于纯 Python、且能跑在仿真侧 3.11 上的策略。
 2. **跨进程**：Python 版本本身就冲突时（`policy/pi05_lerobot` 要 3.12），策略跑在自己的
    解释器里，与 `eval_policy.py` 用 stdio JSON 通信（`smolvla_worker.py`、`pi05_worker.py`）。
@@ -43,12 +43,12 @@ EmbodiChain 必须与本仓库**同级 clone**。
 bash launch/_print_available_tasks.sh
 
 # 采集：<task> <setting(clear|random)> <format(3_0|2_1)>
-bash launch/run_task.sh click_bell clear 2_1 --max_episodes 100 --headless
+bash launch/run_task_seeded.sh click_bell clear 2_1 --max_episodes 100 --headless
 bash launch/collect_validated_batch.sh ...     # 带校验门，产出即训练就绪
 python scripts/validate_lerobot_dataset.py ... # 首个失败门即非零退出，可当硬门禁
 
 # 评估（统一入口，各 policy 的 eval.sh 只是包装）
-python scripts/eval_policy.py --config policy/<name>/deploy_policy.yml \
+python scripts/eval_policy_parallel.py --config policy/<name>/deploy_policy.yml \
     --overrides --task_name click_bell --setting random --max_episodes 100
 cd policy/pi05 && bash eval.sh <task> <setting> <train_config> <model_name> <gpu_id>
 
@@ -97,9 +97,9 @@ setting：`clear`（无随机化，日常验证）、`random`（官方评测口�
 
 `robosynchallenge/managers/{actions,datasets,events,observations}.py` 通过把模块名 append 进
 `gym_utils.DEFAULT_MANAGER_MODULES` 注入 EmbodiChain 的 functor 注册表——这就是 gym_config 里
-自定义 functor 名字能被解析的原因。新增 manager 必须同步这个列表（`scripts/eval_policy.py` 顶部有一份）。
+自定义 functor 名字能被解析的原因。新增 manager 必须同步这个列表（`scripts/eval_policy_parallel.py` 顶部有一份）。
 
-**策略适配契约**。`scripts/eval_policy.py` 用 `importlib.import_module(f"policy.{name}")` 动态加载，
+**策略适配契约**。`scripts/eval_policy_parallel.py` 用 `importlib.import_module(f"policy.{name}")` 动态加载，
 要求包顶层导出 `get_model(usr_args) / eval(env, model, obs) / reset_model(model)`
 （通常靠 `policy/<name>/__init__.py` 里 `from .deploy_policy import *`）。
 `eval` 返回 `(obs, info, truncated, inference_times)`，旧的 3 元组也兼容。
@@ -110,6 +110,28 @@ setting：`clear`（无随机化，日常验证）、`random`（官方评测口�
 `env.step()`，每步检查 `is_task_success()` 与 `truncated.any()` 提前 break，返回最后一次的四元组。
 这决定了「一次推理执行几步」是策略侧的自由度（pi0.5 的 `pi0_step` / `phase_action_chunks`、
 pi05_lerobot 的 `per_step` vs `chunk`），也是接新策略最容易写错的地方。
+**已验证的经验：`table_rearrangement`、`handle_basket`、`click_bell` 三个任务用 step=10（每次推理执行 10 步，
+即 `pi0_step: 10` / `act_step: 10`）成功率更高**，评测这三个任务不要改成更长的开环步数。依据如下：
+- 来源：2026-08-30～31 在 2×A100 云机（16 卡）上跑的 pi0.5 `_ft67500` 全存档 × 执行长度扫描，
+  44 个 checkpoint × H∈{10,50} × 20 集（同种子、官方判定），报告 `report/单任务微调权重评估_20260831.pdf`
+  （`report/` 在 gitignore 里，只在本机）。
+- 训练：2026-08-29 起跑，配置 `pi05_<task>_ft67500`（`policy/pi05/src/openpi/training/config.py`，
+  一键脚本 `policy/pi05/train_scripts/train_ft67500.sh`）。基座 = all10 共训 `pi05_all10_h64_expert`
+  的 ckpt 67500（`all10_expert_base_h64_bs64_steps100k`，海光 DCU 8 卡训，数据集 `RoboSynChallenge/all10_expert_h64`）；
+  数据集 = 官方单任务 `RoboSynChallenge/cobotmagic_Sim_<task>`（每任务约 1000 集，10 任务共 86G）；
+  `action_horizon=64`（必须与基座一致）、bs=50、2 个 epoch、cosine lr 峰值 1e-5 / warmup 500、
+  `ema_decay=None`、norm_stats 复用基座 `all10_expert_h64` 的（不重算）、每任务存 4 个 checkpoint。
+- 结果（成功率，20 集）：
+
+  | 任务 | 基线 all10 ck67500 (H=50) | 最佳 H=10 | 最佳 H=50 |
+  |---|---|---|---|
+  | table_rearrangement | 55% | **95%** @ck7999 | 55% |
+  | handle_basket | 60% | **95%** @ck3336 | 45% |
+  | click_bell | 60% | **80%** @ck2220 | 50% |
+
+  同一批扫描里 `manipulate_pipette`（75% vs 25%）和 `items_handover`（50% vs 30%）也是 H=10 更好；
+  `drawer_open_place` 相反（H=10 为 0%，H=50 为 30%），`water_pouring`/`mixer_operating` H=50 略优。
+  另外最终存档往往不是最好的（click_bell 最优在 ck2220，不是末尾 ck2959），挑权重要按存档逐个评。
 语言指令不走 yml：`eval_policy.py` 从 gym_config 递归提取 instruction 写到 `env._current_instruction`，
 适配器首次调用时读它并 `model.set_language(...)`。
 
@@ -119,6 +141,34 @@ pi05_lerobot 的 `per_step` vs `chunk`），也是接新策略最容易写错的
 每 episode 步数上限取 `max(deploy_config.max_steps, gym_config.max_episode_steps)`，不是 yml 里那个值。
 并行评估用 `num_shards` / `shard_index`：种子 rng 在所有分片里照常逐个抽取、只跳过不属于自己的
 episode，所以 N 个分片合并后与「单进程跑满 max_episodes」是同一批种子——改这段循环会静默破坏可比性。
+
+**每次评估一律走 `scripts/eval_policy_parallel.py`**（各 `policy/*/eval.sh` 只是它的包装，`launch/` 下的评估脚本最终也
+落到它），成功率、动作步数、推理时间都以它写出的 `evaluation_metrics.json` 为准，不要另写评估循环、
+不要拿训练侧或采集侧脚本的数字充当评估结果。它逐集记：成败（未截断且 `is_task_success()` 为真）、
+动作步数（成功取实际步数，失败按 H 计）、每集总推理时间（不含 `env.step()`）。
+
+**官方榜单打分公式（每次评估都要按它算一遍总分，写进 report.md）**：
+
+```
+Overall Score = 75% × Success Rate + 20% × Action Efficiency + 5% × Inference Efficiency
+Episode Action Efficiency    = (1 − Used Action Steps / H) × 100          # H = 该任务 max_episode_steps
+Episode Inference Efficiency = max(0, 1 − Measured Inference Time / T) × 100
+```
+
+Success Rate 是官方判定下成功的 episode 百分比；Action/Inference Efficiency 按 episode 算再取平均。
+T = 官方 ACT baseline 在 RTX 5090 上推出该任务对应动作步数所需的时间，官方只在 5090 上测，
+本地没有 5090，所以 Inference Efficiency 只能给估计值，报告里要注明测量卡型。
+`evaluation_metrics.json` 里已有对应原料：`success_rate`、`average_action_steps_ratio`
+（= Used Steps / H 的均值，Action Efficiency ≈ (1 − 它) × 100）、
+`average_inference_time_per_episode_seconds`（Measured Inference Time）。**官方 `eval.sh` / `eval_policy.py`
+都不算效率项和总分，只吐这些原料**，总分要自己按公式算。
+分母 T 用官方发布的 `evaluation_results/released_checkpoint_results.json`（与 `official/main` 一致）里 ACT 的
+`estimated_average_total_inference_time_seconds`（RTX 5090，单次 11.6 ms × 每集调用次数）：
+click_bell 0.067 s / drawer_open_place 0.174 s / mixer_operating 0.075 s / table_rearrangement 0.058 s /
+water_pouring 0.066 s；**其余 5 个任务官方没发 T**，只能按「ACT 单次 11.6 ms × 该任务 ACT 每集调用次数」估。
+成功率占 75%，但 Action Efficiency 占 20%——同样成功率下更早完成（步数少）的策略分更高，
+所以 step=10 这类更早触发 `is_task_success` 的设置对总分是双重收益；失败集的 Used Steps 通常跑满 H，
+Action Efficiency 归零，也会拖总分。
 
 **成功判定只认官方版**。评测口径 = 每步调用 `env.get_wrapper_attr("is_task_success")()`，
 且必须未 truncated。`compute_task_state()` 返回的 success 位在多数任务里被刻意置 0，**不能拿来算成功率**；
@@ -156,6 +206,12 @@ gym_config 的 dataset functor（保留失败集），并在数据集目录写 `
   **各 worktree 有各自的 CLAUDE.md**，内容按该分支实际有的东西写，不要跨目录照搬。
   注意它们都没有自己的 `.venv`，也没有 `tests/`（这两样目前只在 `main` 上）。
 - 远端：`origin` = 主办方 EDEM-AI（只读上游），`mine` = 个人 fork（推这里）。
+- **评估产物落盘**：评估视频一律写到 `/root/workspace/eval_results/`（评估机上的绝对路径，仓库外，不进 git），
+  按 `<task>/<model>/<framework>/<step>/` 分目录存放——顶层固定是 10 个任务名文件夹（`_print_available_tasks.sh`
+  的清单），往下是模型（如 `pi05`）/ 推理框架（如 `jax`、`realtime_vla`）/ checkpoint 步数（如 `28000`），
+  视频、`evaluation_metrics.json`、`report.md` 直接放在步数目录里，setting 写进 report。**每次评估都要写评估报告**：至少含官方公式算出的 Overall Score（见「官方榜单打分公式」）、checkpoint/配置、
+  `max_episodes` 与种子口径、官方判定下的成功率、逐 episode 成败、失败模式归类，报告与视频同目录
+  （`report.md`）；结论要长期留档的再拷一份进 `docs/`。仓库内的 `eval_result/` 只是本机临时产物，别当归档。
 - 大产物一律 gitignore：`lerobot_dataset/`、`training_data/`、`eval_result/`、`/report/`、
   `outputs/`、`checkpoints`。报告类结论要留档就写进 `docs/`，别指望 `report/` 能被 clone 到。
 - 公开仓库卫生：内网 SSH 端点、私有 pip 源地址一律不入库，只写「需分发权限」。
@@ -164,5 +220,5 @@ gym_config 的 dataset functor（保留失败集），并在数据集目录写 `
 - **没有 lint/format 门禁**：`pyproject.toml` 的 `[tool.black]` 是个空节，没有 ruff/pre-commit 配置，
   `.github/` 只有一个 PR 模板。别去找「跑一下 lint」的命令，按周围代码风格写即可。
 - `scripts/` 有 40 个脚本、`launch/` 有 30 多个：`scripts/README.md` 和 `launch/README.md`
-  是逐脚本的用途/参数手册，先查表再读源码。`scripts/eval_policy.py.fixed` 是未入库的游离副本，
-  真正的入口永远是 `scripts/eval_policy.py`。
+  是逐脚本的用途/参数手册，先查表再读源码。`scripts/eval_policy_parallel.py.fixed` 是未入库的游离副本，
+  真正的入口永远是 `scripts/eval_policy_parallel.py`。
