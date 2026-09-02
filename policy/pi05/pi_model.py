@@ -30,6 +30,7 @@ class PI0:
         self.model_name = model_name
         self.checkpoint_id = checkpoint_id
         self.inference_backend = inference_backend
+        self.pytorch_device = pytorch_device
 
         root = Path(checkpoint_root or "policy/pi05/checkpoints")
         checkpoint_path = root / train_config_name / model_name / str(checkpoint_id)

@@ -20,6 +20,15 @@ from pi_model import PI0
 from policy.inference_timing import finish_inference, start_inference
 
 
+def _any_true(value):
+    """Convert scalar/array/tensor done flags to a Python bool."""
+    if isinstance(value, torch.Tensor):
+        return bool(value.any().item())
+    if isinstance(value, np.ndarray):
+        return bool(value.any())
+    return bool(value)
+
+
 def _format_env_action(action, env):
     """Convert pi0 output into the torch action format EmbodiChain accepts."""
     action_array = np.asarray(action, dtype=np.float32).reshape(-1)
@@ -134,7 +143,7 @@ def eval(env, model, obs):
 
         if env.get_wrapper_attr("is_task_success")():
             break
-        if truncated.any():
+        if _any_true(truncated):
             break
 
         # Update observation window after each step

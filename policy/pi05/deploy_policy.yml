@@ -26,6 +26,6 @@ pi0_step: 10 # It only represents the number of execution steps. not the horizon
 inference_backend: jax # Set to realtime_vla to enable the Triton backend.
 checkpoint_root: null # Optional external checkpoint root, e.g. the original worktree's policy/pi05/checkpoints.
 converted_checkpoint: null # Required by realtime_vla; path to the converted .pkl.
-realtime_vla_dir: /home/phl/workspace/realtime-vla
-tokenizer_path: /home/phl/.cache/openpi/big_vision/paligemma_tokenizer.model
+realtime_vla_dir: null # Defaults to $REALTIME_VLA_DIR, then ../realtime-vla next to the repo.
+tokenizer_path: null # Defaults to ~/.cache/openpi/big_vision/paligemma_tokenizer.model.
 prompt_for_allocation: click the bell

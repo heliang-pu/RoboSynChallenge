@@ -55,4 +55,9 @@ bash policy/pi05/eval.sh click_bell random \
   --converted_checkpoint /home/phl/workspace/RoboSynChallenge-realtime-vla/checkpoints/realtime_vla/pi05_click_bell_19999.pkl
 ```
 
-See [RESULTS.md](RESULTS.md) for measured latency and JAX consistency.
+See [RESULTS.md](RESULTS.md) for measured latency, JAX consistency and the
+simulator regression. Two things in `accelerated_policy.py` exist only to make
+the accelerator coexist with the simulator in one process and must stay: the
+CUDA graph is recorded with `capture_error_mode="thread_local"` (the upstream
+default `global` mode makes DexSim's render thread abort the process), and
+`pi_model.py` keeps the upstream `Pi05Inference` untouched by subclassing it.

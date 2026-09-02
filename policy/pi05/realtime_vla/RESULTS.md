@@ -34,6 +34,49 @@ noise. Comparison after action unnormalization and dual-arm delta restoration:
 - Triton action range: [-0.18935, 1.12304]
 
 The residual difference is expected from the accelerator's BF16 weights and
-fused Triton kernels. A simulator success-rate regression should still be run
-before making Triton the default deployment backend.
+fused Triton kernels.
+
+## Simulator regression (2026-09-01, RTX 4090)
+
+`click_bell / clear`, checkpoint `19999`, `--seed 0` (identical episode seeds for
+both backends), 3 episodes, `pi0_step=10`:
+
+| Backend | Episodes | Per-episode outcome | Evaluator-measured inference (mean) |
+|---|---:|---|---:|
+| OpenPI JAX | 2/3 | success, timeout, success | 350.3 ms over 49 calls |
+| realtime-vla Triton | 2/3 | success, timeout, success | 61.8 ms over 49 calls |
+
+Outcomes match episode by episode. The evaluator timer includes observation
+preprocessing and action unnormalization (`env.step` excluded); the JAX figure
+is far above the 80.89 ms microbenchmark because OpenPI's policy runs its
+image transforms on the CPU per call, whereas the Triton adapter does that part
+in a few numpy ops.
+
+### What had to be fixed to get the simulator run at all
+
+Every attempt on 2026-08-20 died before the first action. Three independent
+problems, all in this branch (the upstream realtime-vla clone is untouched):
+
+1. **CUDA graph capture mode.** `Pi05Inference.__init__` records its graph with
+   torch's default `global` capture mode, which turns unsafe CUDA calls from
+   *any* thread in the process into errors. DexSim's hybrid renderer keeps a
+   thread that calls `cudaStreamSynchronize`, so the capture made it fail and
+   the simulator aborted the process (`DFGpuSemaphore.cpp:346: CUDA stream
+   synchronization failed`). `accelerated_policy.py` now records the graph with
+   `capture_error_mode="thread_local"` (a `CUDAGraph` subclass injected through a
+   `Pi05Inference` subclass). The abort also discards Python's stdout buffer,
+   which is why the earlier diagnosis blamed `gym.make()`; run with
+   `PYTHONUNBUFFERED=1` when chasing crashes like this.
+2. **`PI0.pytorch_device` missing.** The rewritten `pi_model.py` never stored
+   the attribute while the merged upstream `deploy_policy.eval` reads it for
+   timing, so every episode raised on its first step -- and `env.close()`
+   (`os._exit(0)` by default) swallowed the traceback. Affected both backends.
+3. **`truncated.any()`** breaks now that the env returns a Python `bool`;
+   `_any_true` was ported from `main`.
+
+On multi-GPU hosts `select_cuda_device` additionally pins JAX to the
+`--gpu_id` card (`jax_cuda_visible_devices`); otherwise it preallocates 75% of
+every GPU in the machine. Use `EMBODICHAIN_SIM_EXIT_PROCESS=0` if you need the
+metrics file: the default `os._exit(0)` in `env.close()` runs before it is
+written.
 

@@ -36,7 +36,16 @@ RoboSynChallenge：基于 EmbodiChain 的双臂（CobotMagic，14-DoF）操作�
 **已实测结果**（`RESULTS.md`，2026-08-20，RTX 4090 / PyTorch 2.7.1+cu126 / Triton 3.3.1，
 checkpoint `pi05_click_bell_baseline/19999`，三路 224×224 + 14 维 state，输出 50 步 chunk）：
 端到端 **80.89 ms → 43.26 ms（1.87×，延迟降 46.5%）**。改动前后要重跑基准就用同一组条件，
-否则数字不可比。
+否则数字不可比。**仿真回归 2026-09-01 才第一次跑通**（同种子逐集结局与 JAX 一致，见 `RESULTS.md`
+「Simulator regression」），之前一直在 `Creating model...` 处 abort，根因和修法都记在那一节里；
+最容易再踩的一条：**realtime-vla 用默认 `global` 模式录 CUDA graph 会把 DexSim 渲染线程弄崩**，
+`accelerated_policy.py` 里已强制 `thread_local`，别去掉。
+
+在仿真里排崩点一律 `PYTHONUNBUFFERED=1`（SIGABRT 不冲刷 stdout，日志会缺后半截，8-20 那次
+就是这样误判成 `gym.make()` 崩的）；要拿到 `evaluation_metrics.json` 必须
+`EMBODICHAIN_SIM_EXIT_PROCESS=0`，否则 `env.close()` 的 `os._exit(0)` 跑在写指标之前。
+多卡机（A100 ×8）上**不要用 `CUDA_VISIBLE_DEVICES`**（Vulkan 不认，会和 CUDA 选到不同物理卡），
+用 `--gpu_id N`；`select_cuda_device` 会把 JAX 也限制到这张卡，否则它在每张卡上预留 75% 显存。
 
 ## 环境分层（最容易踩的坑）
 

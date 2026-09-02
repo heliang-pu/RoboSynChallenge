@@ -29,6 +29,32 @@ def _resize_with_pad(image: np.ndarray, width: int = 224, height: int = 224) -> 
     return np.asarray(canvas)
 
 
+class _ThreadLocalCaptureGraph(torch.cuda.CUDAGraph):
+    """CUDA graph whose capture leaves other threads' CUDA calls alone.
+
+    Upstream records the inference graph in torch's default ``global`` capture
+    mode, which turns every unsafe CUDA call from *any* thread in the process
+    into an error for the duration of the capture. DexSim's hybrid renderer keeps
+    a thread that calls ``cudaStreamSynchronize`` (``DFGpuSemaphore.cpp``), so in
+    the evaluator process the capture makes that call fail and the simulator
+    aborts the whole process. ``thread_local`` only polices the capturing thread.
+    """
+
+    def capture_begin(self, pool=None, capture_error_mode="thread_local"):
+        return super().capture_begin(pool=pool, capture_error_mode=capture_error_mode)
+
+
+def _sim_safe_inference_cls(pi05_infer):
+    """Subclass ``Pi05Inference`` so its graph is recorded with a thread-local capture."""
+
+    class SimSafePi05Inference(pi05_infer.Pi05Inference):
+        def record_infer_graph(self):
+            self.infer_graph = _ThreadLocalCaptureGraph()
+            super().record_infer_graph()
+
+    return SimSafePi05Inference
+
+
 class RealtimeVlaPi05Policy:
     """Expose the click-bell model with the same observation/action contract as PI0."""
 
@@ -60,7 +86,7 @@ class RealtimeVlaPi05Policy:
         self._chunk_size = chunk_size
         self._delta_mask = np.asarray([True] * 6 + [False] + [True] * 6 + [False])[:action_dim]
         self._rng = np.random.default_rng(0)
-        self._infer = pi05_infer.Pi05Inference(
+        self._infer = _sim_safe_inference_cls(pi05_infer)(
             checkpoint=checkpoint,
             num_views=num_views,
             chunk_size=chunk_size,
