@@ -36,6 +36,13 @@ RoboSynChallenge：基于 EmbodiChain 的双臂（CobotMagic，14-DoF）操作�
 均可用环境变量覆盖。YAML 里的路径一律**相对仓库根**，所以对应命令必须从仓库根执行。
 EmbodiChain 必须与本仓库**同级 clone**。
 
+**官方入口一律原样**（2026-09-02 起）：`scripts/eval_policy.py`、`scripts/run_env.py`、`launch/run_task.sh` 与
+`origin/main` 逐字节一致，正式/对外评测只用它们（跑法：`policy/<name>/eval.sh` 或直接调官方脚本）。
+我们的功能版另起文件：`scripts/eval_policy_parallel.py`（`--num_shards/--shard_index`、`--num_envs`、
+`rollout_save`、指标写盘挪到 `env.close()` 之前、多卡 JAX 限卡）、`scripts/run_env_seeded.py`（`--seed` 走
+SeededCollection）、`launch/run_task_seeded.sh`。指标定义（成功率、平均步数、推理耗时）两套文件完全相同，
+只是执行布局不同；**别再改官方那三个文件**，要加功能改 `_parallel` / `_seeded` 版。
+
 ## 常用命令
 
 ```bash
