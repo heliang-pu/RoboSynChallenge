@@ -133,6 +133,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--arena_space", default=5.0, type=float)
     parser.add_argument("--enable_rt", default=False, action="store_true")
     parser.add_argument("--gpu_id", default=0, type=int)
+    parser.add_argument(
+        "--renderer",
+        default=None,
+        type=str,
+        help="Renderer backend override (hybrid/fast-rt/rt). None keeps the gym_config value.",
+    )
+    # merge_args_with_gym_config reads args.max_episodes unconditionally; the
+    # analyzer never records episodes, so keep it as a hidden no-op argument.
+    parser.add_argument("--max_episodes", default=None, type=int, help=argparse.SUPPRESS)
     parser.add_argument("--preview", default=False, action="store_true")
     parser.add_argument("--headless", dest="headless", default=True, action="store_true")
     parser.add_argument("--no-headless", dest="headless", action="store_false")
@@ -171,7 +180,6 @@ def parse_args() -> argparse.Namespace:
         action="store_false",
         help="Keep distractor randomization events.",
     )
-
     parser.add_argument(
         "--sample-mode",
         default="grid",
@@ -582,20 +590,18 @@ def filter_gym_config_for_analysis(
     filtered_config = deepcopy(gym_config)
     removed_events: list[str] = []
 
-    if not args.filter_distractor_events:
-        return filtered_config, removed_events
-
     events = filtered_config.get("env", {}).get("events", {})
-    for event_name, event_cfg in list(events.items()):
-        func_name = str(event_cfg.get("func", "")).lower()
-        params_text = json.dumps(event_cfg.get("params", {}), sort_keys=True).lower()
-        if (
-            "distractor" in event_name.lower()
-            or "distractor" in func_name
-            or "distractor" in params_text
-        ):
-            events.pop(event_name)
-            removed_events.append(event_name)
+    if args.filter_distractor_events:
+        for event_name, event_cfg in list(events.items()):
+            func_name = str(event_cfg.get("func", "")).lower()
+            params_text = json.dumps(event_cfg.get("params", {}), sort_keys=True).lower()
+            if (
+                "distractor" in event_name.lower()
+                or "distractor" in func_name
+                or "distractor" in params_text
+            ):
+                events.pop(event_name)
+                removed_events.append(event_name)
 
     return filtered_config, removed_events
 
@@ -615,12 +621,18 @@ def import_runtime() -> None:
 
 
 def make_env(args: argparse.Namespace):
+    """Build the env the same way ``scripts/run_env.py`` does.
+
+    Mirrors ``embodichain.lab.gym.utils.gym_utils.build_env_cfg_from_args`` so
+    the simulation config (headless / device / renderer / gpu_id / arena_space)
+    stays in sync with the EmbodiChain launcher instead of being rebuilt here.
+    """
     import gymnasium as gym
     from embodichain.lab.gym.utils.gym_utils import (
         config_to_cfg,
+        get_manager_modules,
         merge_args_with_gym_config,
     )
-    from embodichain.lab.sim import SimulationManagerCfg
 
     raw_gym_config = load_json(args.gym_config)
     filtered_gym_config, removed_events = filter_gym_config_for_analysis(
@@ -632,8 +644,10 @@ def make_env(args: argparse.Namespace):
             + ", ".join(removed_events)
         )
 
+    if getattr(args, "enable_rt", False) and args.renderer is None:
+        args.renderer = "rt"
     gym_config = merge_args_with_gym_config(args, filtered_gym_config)
-    env_cfg = config_to_cfg(gym_config)
+    env_cfg = config_to_cfg(gym_config, manager_modules=get_manager_modules())
     env_cfg.filter_visual_rand = args.filter_visual_rand
     env_cfg.filter_dataset_saving = args.filter_dataset_saving
     if args.preview:
@@ -644,16 +658,23 @@ def make_env(args: argparse.Namespace):
         action_config = load_json(args.action_config)
         action_config["action_config"] = action_config
 
-    env_cfg.sim_cfg = SimulationManagerCfg(
-        headless=gym_config["headless"],
-        sim_device=gym_config["device"],
-        enable_rt=gym_config["enable_rt"],
-        gpu_id=gym_config["gpu_id"],
-        arena_space=gym_config["arena_space"],
-    )
-
     env = gym.make(id=gym_config["id"], cfg=env_cfg, **action_config)
+    ensure_env_action_config(env, action_config)
     return env
+
+
+def ensure_env_action_config(env, action_config: dict[str, Any]) -> None:
+    """Attach ``action_config`` to envs whose ``__init__`` does not keep it.
+
+    Nine task envs store ``kwargs["action_config"]`` on ``self`` in ``__init__``;
+    ``HandleBasketEnv`` (upstream) does not, so ``create_demo_action_list`` raises
+    ``AttributeError`` for it. ``robosynchallenge/tasks`` must stay byte-identical
+    to upstream, so the attribute is attached here instead.
+    """
+    base_env = getattr(env, "unwrapped", env)
+    cfg = action_config.get("action_config") if isinstance(action_config, dict) else None
+    if cfg and getattr(base_env, "action_config", None) is None:
+        base_env.action_config = cfg
 
 
 def unwrap_env(env):

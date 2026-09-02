@@ -129,7 +129,7 @@
                 "mode": "reset",
                 "params": {
                     "entity_cfg": {"uid": "pipette"},
-                    "position_range": [[0.45, -0.28, 0.86], [0.72, -0.1, 0.86]],
+                    "position_range": [[0.45, -0.28, 0.86], [0.66, -0.1, 0.86]],
                     "rotation_range": [[0, 0, -30], [0, 0, 30]],
                     "relative_position": false,
                     "relative_rotation": true

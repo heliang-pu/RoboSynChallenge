@@ -123,7 +123,7 @@
                 "mode": "reset",
                 "params": {
                     "entity_cfg": {"uid": "holder"},
-                    "position_range": [[0.5, 0.0, 0.884], [0.7, 0.25, 0.884]],
+                    "position_range": [[0.53, 0, 0.884], [0.7, 0.18, 0.884]],
                     "relative_position": false
                 }
             },
@@ -132,7 +132,7 @@
                 "mode": "reset",
                 "params": {
                     "entity_cfg": {"uid": "pen"},
-                    "position_range": [[0.52, -0.3, 0.884], [0.675, 0.0, 0.884]],
+                    "position_range": [[0.52, -0.3, 0.884], [0.64, -0.09, 0.884]],
                     "rotation_range": [[0, 0, -30], [0, 0, 30]],
                     "relative_position": false,
                     "relative_rotation": true

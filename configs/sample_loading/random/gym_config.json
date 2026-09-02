@@ -130,7 +130,7 @@
                 "mode": "reset",
                 "params": {
                     "entity_cfg": {"uid": "rack"},
-                    "position_range": [[0.63, 0, 0.865], [0.7, 0.15, 0.865]],
+                    "position_range": [[0.67, 0, 0.865], [0.7, 0.08, 0.865]],
                     "rotation_range": [[0, 0, 0], [0, 0, 90]],
                     "relative_position": false,
                     "relative_rotation": true

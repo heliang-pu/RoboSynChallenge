@@ -103,7 +103,7 @@
                 "mode": "reset",
                 "params": {
                     "entity_cfg": {"uid": "button"},
-                    "position_range": [[0.4, -0.3, 0.83], [0.85, 0.3, 0.83]],
+                    "position_range": [[0.4, -0.3, 0.83], [0.69, 0.03, 0.83]],
                     "relative_position": false
                 }
             },

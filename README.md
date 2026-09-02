@@ -13,51 +13,16 @@
 
 > **分支导航** — 本仓库按主题分支开发，每个分支的说明就在各自 README 的这个位置。
 >
-> **`main`（当前）** 测评 · [`official/main`](../../tree/official/main) 官方同步 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练
+> [`main`](../../tree/main) 测评 · [`official/main`](../../tree/official/main) 官方同步 · **`fix/random-spawn-reachability`（当前）** 评测随机范围修正 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练
 
-## 本分支：`main` — 测评分支
+## 本分支：`fix/random-spawn-reachability` — 评测 `random` 配置的物体生成范围修正
 
-**跑评测的地方**，也是各条实验线的汇合点：实验分支做完合回这里，在统一口径下横向比较。
-因此它的 policy 目录最全，`tests/` 与仓库根 `.venv` 也只在这条分支上。
-共用的东西同样放这里：完整的中文项目说明、按需安装的 uv 训练环境、10 个任务的采集/训练/评估流程，
-以及**回退到官方口径的成功判定**（本地改过的判定已全部撤回，避免与排行榜对不上）。
+从 `main`（`8fc3081`）切出，只改 `configs/<task>/random/` 与 `random_3p/` 里物体 pose 随机化事件的 `position_range`，
+把机械臂够不到、专家 IK 必定失败的区域从范围里去掉（例如 click_bell 的铃铛原来能出生在离右臂基座 0.86 m 的地方）。
+8 处改动、依据与未完成的验证见 [docs/random_spawn_reachability.md](docs/random_spawn_reachability.md)；
+`robosynchallenge/tasks/` 与旋转范围未动。附带修好了 `scripts/analyze_rigid_spawn_range.py` 与现版 EmbodiChain 启动器的脱节。
 
-分支分三类：
-
-| 分支 | 角色 |
-|---|---|
-| `main` | **测评分支**，实验分支合流后在这里跑评测 |
-| `official/main` | **官方同步分支**，跟踪主办方 `EDEM-AI/RoboSynChallenge`，只负责把上游拉进来，不在上面开发 |
-| `sim-recap` / `feat/rtc-async-pi05` / `feat/realtime-vla-pi05` / `ppo-post-training` | 实验分支，各管一摊 |
-
-功能开发在实验分支上做，各自开了 worktree（`git worktree list` 是权威清单），
-**每个 worktree 有各自的 `CLAUDE.md`**，按该分支实际有的东西写，不要跨目录照搬。
-
-`feat/lila-wam` 与 `feat/lerobot-pi05-mem` 已于 2026-09-01 合入本分支并删除，内容如下。
-
-### LiLa-WAM 接入与随机化覆盖度采集
-
-- **LiLa-WAM 策略**：上游以 submodule 引入，附 deploy 入口、训练脚本、帧缓存、norm stats 与任务条件预计算（`policy/lila_wam/`，说明见 `docs/tutorials/policy/lila_wam.md`）
-- **随机化覆盖度**：`scripts/analyze_random_coverage.py` 统计官方 random 配置的实际覆盖，`scripts/build_coverage_configs.py` 据此生成 93 组收窄范围的采集配置（分层补匀 + 缺口补采），产物在 `configs/<task>/coverage_*/`
-- **约束随机化**：`randomize_rigid_object_pair_pose_constrained` 按 mesh 半尺寸保证成对物体的最小 xy 间隙；配套 6 个**直接调用生产判定函数**而非另写一份实现的测试
-- **数据流水线**：种子化采集、v3.0→v2.1 转换、多视角质检、官方与自采数据合并（`scripts/`、`launch/`）
-- **DM0.5 海光 DCU**：批大小探测、微调入口、checkpoint 回传与看门狗（`policy/dm05/`）
-
-> 覆盖度配置的生成输入 `report/coverage/` 属本地产物不入库，因此生成的配置一并提交，否则 clone 后无法复现。
-
-### LeRobot pi0.5（PyTorch）与 MEM 观测记忆
-
-把 HuggingFace LeRobot 的 pi0.5 PyTorch 实现接成第二套 pi0.5 集成（`policy/pi05_lerobot/`），
-与既有的 openpi/JAX 版 `policy/pi05` 并存，可在同一任务同一 setting 下直接对比。
-
-- **跟最新上游**：锁定含 MEM 的 upstream commit（huggingface/lerobot#4076，短时程视觉与本体观测记忆），`setup_lerobot.sh` 会拒绝没有 `policies/pi05/memory.py` 的版本
-- **MEM 决定执行节奏**：MEM 的历史环形缓冲每次策略调用只入队一帧，只有「每个环境步喂一次」才与训练一致。因此 eval 有 `per_step` / `chunk` 两种模式，带 MEM 的 checkpoint 默认走 `per_step`（实测 12 个环境步：`per_step` 喂满 12 帧，`chunk` 只喂 3 帧）
-- **stride 跟数据集帧率**：`memory_stride` 以数据集帧计，本仓库数据 25fps 而上游默认 30，`finetune.sh` 直接从 `meta/info.json` 读 fps
-- **独立 uv 环境 + worker 进程**：LeRobot 要求 Python ≥3.12 与 transformers v5，仿真侧钉死 3.11，装不进同一解释器；策略跑在自己的 uv 环境里，经 stdio JSON 与 `eval_policy.py` 通信
-- **老 checkpoint 迁移**：过期 config 字段与写死的 tokenizer 路径这两类坑有现成解法，见策略 README
-
-> 说明见 `policy/pi05_lerobot/README.md` 与 `docs/tutorials/policy/pi05_lerobot.md`。
-
+**注意**：改了 `random` 等于改了评测分布，本分支的成功率与 `origin/main` 口径不可直接对表。
 
 ---
 

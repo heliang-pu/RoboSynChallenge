@@ -128,7 +128,7 @@
                 "mode": "reset",
                 "params": {
                     "entity_cfg": {"uid": "duck"},
-                    "position_range": [[0.53, 0.18, 0.87], [0.8, 0.35, 0.87]],
+                    "position_range": [[0.59, 0.18, 0.87], [0.8, 0.35, 0.87]],
                     "rotation_range": [[0, 0, -30], [0, 0, 30]],
                     "relative_position": false,
                     "relative_rotation": true
