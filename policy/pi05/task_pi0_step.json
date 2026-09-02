@@ -9,5 +9,17 @@
   "drawer_open_place": 50,
   "water_pouring": 50,
   "items_handover": 50,
-  "item_assembly": 50
+  "item_assembly": 50,
+  "_confidence": {
+    "click_bell": "sure",
+    "handle_basket": "sure",
+    "table_rearrangement": "sure",
+    "drawer_open_place": "sure",
+    "items_handover": "medium (flips with checkpoint family; 50 is for the single_task 28000 batch)",
+    "item_assembly": "medium (only table A, +11 pts / 100 eps)",
+    "manipulate_pipette": "uncertain between 10 and 30 (only 50 is excluded)",
+    "water_pouring": "uncertain between 10 and 50 (both within noise)",
+    "mixer_operating": "uncertain (no SR difference; 10 chosen for action efficiency)",
+    "sample_loading": "irrelevant (all ~0%)"
+  }
 }
