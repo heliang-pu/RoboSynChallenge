@@ -6,7 +6,7 @@ two 50-step chunks is purely the accelerator's numerical error. Only the JAX
 chunk is executed, so the trajectory is the reference one and the comparison is
 never contaminated by closed-loop divergence.
 
-Run from the repository root with the same PYTHONPATH as scripts/eval_policy.py::
+Run from the repository root with the same PYTHONPATH as scripts/eval_policy_parallel.py::
 
     python -m policy.pi05.realtime_vla.paired_precision --task click_bell \
         --train-config pi05_base_robosynchallenge_full --model-name click_bell_19999 \
@@ -60,7 +60,7 @@ def main() -> None:
         "--checkpoint_root", args.checkpoint_root, "--gpu_id", str(args.gpu_id), "--pytorch_device", "cuda",
         "--headless", "True", "--eval_video_log", "False", "--pi0_step", str(args.pi0_step),
     ]
-    import eval_policy as ep  # noqa: PLC0415
+    import eval_policy_parallel as ep  # noqa: PLC0415  (multi-GPU JAX pinning lives in the parallel evaluator)
 
     config = ep.parse_args_and_config()
     ep.select_cuda_device(config)
