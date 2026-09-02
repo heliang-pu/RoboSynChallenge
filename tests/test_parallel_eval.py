@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 import torch
 
-from scripts.eval_policy import ParallelEvalProxy, build_episode_plan
+from scripts.eval_policy_parallel import ParallelEvalProxy, build_episode_plan
 
 
 class StubBatchEnv:

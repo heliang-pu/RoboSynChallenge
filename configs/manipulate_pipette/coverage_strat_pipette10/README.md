@@ -15,7 +15,7 @@
 ## 采集
 
 ```bash
-python -m scripts.run_env \
+python -m scripts.run_env_seeded \
     --gym_config configs/manipulate_pipette/coverage_strat_pipette10/gym_config.json \
     --action_config configs/manipulate_pipette/action_config.json \
     --num_envs 1 --max_episodes 125 --headless --report_task_success

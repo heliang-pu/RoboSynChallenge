@@ -18,9 +18,9 @@ git status --porcelain -uall -- robosynchallenge/tasks/    # 空
 
 | 位置 | 状态 |
 | --- | --- |
-| `scripts/eval_policy.py` 评测主循环的成功判定 | 与官方一致：`if not is_truncated and env.get_wrapper_attr("is_task_success")(): episode_success = True`（本地 [eval_policy.py:812](scripts/eval_policy.py#L812)，官方同一行逻辑）。本地只新增了 `--rollout_save` 侧录与 sidecar 写出，不改判定 |
+| `scripts/eval_policy_parallel.py` 评测主循环的成功判定 | 与官方一致：`if not is_truncated and env.get_wrapper_attr("is_task_success")(): episode_success = True`（本地 [eval_policy.py:812](scripts/eval_policy_parallel.py#L812)，官方同一行逻辑）。本地只新增了 `--rollout_save` 侧录与 sidecar 写出，不改判定 |
 | `configs/*/clear/gym_config.json` | 工作区/暂存区已恢复成官方原样（关节名大写 `RIGHT_JOINT[1-6]` 等），`git diff origin/main -- configs/` 对官方配置零改动，只有新增的自制 coverage/syn 配置目录 |
-| `scripts/run_env.py` | 新增 `--report_task_success` / `--save_only_success` / `--success_settle_steps`，都只是**调用**官方判据，未改判据本身；默认关闭时行为与官方一致 |
+| `scripts/run_env_seeded.py` | 新增 `--report_task_success` / `--save_only_success` / `--success_settle_steps`，都只是**调用**官方判据，未改判据本身；默认关闭时行为与官方一致 |
 | 判定基类 `EmbodiedEnv` | 来自外部依赖 `embodichain` 包，本地未 vendor、未 patch；`third_party/` 只新增了 `evo_rl` |
 
 > 历史：2026-08-25/26 已把各机器上自改的判定（尤其 sample_loading 的几何插入版）全部 `git checkout` 回官方版，
@@ -143,7 +143,7 @@ git status --porcelain -uall -- robosynchallenge/tasks/    # 空
 **成功 = `placement_ok` 连续成立 ≥ 8 帧**（`_place_stable_count`，中断清零）。
 返回的 metrics 含 `cube_xy_dist / place_stable_count / cube_vertical_angle / cube_lin_vel_norm / bottom_z_diff` 等，便于排查。
 
-> 采集侧注意：专家脚本在松手瞬间就结束，稳定计数来不及攒到 8。`scripts/run_env.py --success_settle_steps N` 就是为此加的
+> 采集侧注意：专家脚本在松手瞬间就结束，稳定计数来不及攒到 8。`scripts/run_env_seeded.py --success_settle_steps N` 就是为此加的
 > 保持位姿空步（默认 0 = 官方行为），仅影响采集，不影响评测口径。
 
 ### 2.9 table_rearrangement（摆餐具）— [table_rearrangement.py:155-190](robosynchallenge/tasks/table_rearrangement/table_rearrangement.py#L155-L190)
@@ -180,10 +180,10 @@ git diff --stat origin/main -- robosynchallenge/tasks/
 git status --porcelain -uall -- robosynchallenge/tasks/
 
 # 采集时打印官方判据结果与 metrics
-python scripts/run_env.py ... --report_task_success
+python scripts/run_env_seeded.py ... --report_task_success
 
 # handle_basket 判定细节
-ROBOSYN_DEBUG_SUCCESS_FLAGS=1 python scripts/eval_policy.py ...
+ROBOSYN_DEBUG_SUCCESS_FLAGS=1 python scripts/eval_policy_parallel.py ...
 ```
 
 要改判据请到上游提 PR，不要在本地分叉——本地自改判定与官方评测口径对不上，会污染所有基于成功标签的下游产物

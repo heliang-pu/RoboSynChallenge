@@ -19,7 +19,7 @@
 ## 采集
 
 ```bash
-python -m scripts.run_env \
+python -m scripts.run_env_seeded \
     --gym_config configs/items_handover/coverage_strat_holder00/gym_config.json \
     --action_config configs/items_handover/action_config.json \
     --num_envs 1 --max_episodes 38 --headless --report_task_success

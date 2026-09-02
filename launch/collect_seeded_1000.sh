@@ -89,7 +89,7 @@ PY
         printf '{"task":"%s","batch":%d,"seed":%d,"status":"started"}\n' "$task" "$batch" "$seed" >> "$task_root/MANIFEST.jsonl"
         log="$task_root/logs/batch_$batch_id.log"
         echo "[$task] batch $batch_id seed=$seed -> $log"
-        "$PYTHON_BIN" -m scripts.run_env --gym_config "$runtime" --action_config "$action" \
+        "$PYTHON_BIN" -m scripts.run_env_seeded --gym_config "$runtime" --action_config "$action" \
                 --num_envs 1 --max_episodes "$BATCH_EPISODES" --headless --seed "$seed" \
                 --report_task_success --save_only_success --success_settle_steps "$settle_steps" --max_generation_attempts 1000 \
                 > "$log" 2>&1 || {

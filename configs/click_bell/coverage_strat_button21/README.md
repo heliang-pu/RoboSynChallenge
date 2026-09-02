@@ -15,7 +15,7 @@
 ## 采集
 
 ```bash
-python -m scripts.run_env \
+python -m scripts.run_env_seeded \
     --gym_config configs/click_bell/coverage_strat_button21/gym_config.json \
     --action_config configs/click_bell/action_config.json \
     --num_envs 1 --max_episodes 55 --headless --report_task_success
