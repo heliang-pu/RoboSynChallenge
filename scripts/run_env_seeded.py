@@ -41,6 +41,14 @@ gym_utils.DEFAULT_MANAGER_MODULES = gym_utils.DEFAULT_MANAGER_MODULES + [
 ]
 
 
+def _report_value(value):
+    if isinstance(value, torch.Tensor):
+        return value.detach().to(device="cpu").tolist()
+    if isinstance(value, dict):
+        return {key: _report_value(item) for key, item in value.items()}
+    return value
+
+
 def _generate_function(
     env,
     num_traj,
@@ -49,6 +57,7 @@ def _generate_function(
     save_video: bool = False,
     debug_mode: bool = False,
     reset_first: bool = True,
+    report_task_success: bool = False,
     **kwargs,
 ) -> bool:
     valid = True
@@ -60,6 +69,21 @@ def _generate_function(
             valid = generate_and_execute_action_list(
                 env, trajectory_idx, debug_mode, **kwargs
             )
+
+            if valid and report_task_success:
+                success = env.unwrapped.is_task_success().detach().to(device="cpu")
+                log_info(
+                    f"Success condition after expert rollout: {success.tolist()}",
+                    color="green" if bool(success.all()) else "yellow",
+                )
+                metrics = getattr(env.unwrapped, "_last_success_metrics", None)
+                evaluator = getattr(env.unwrapped, "_evaluate_task_state", None)
+                if metrics is None and evaluator is not None:
+                    evaluated = evaluator()
+                    if isinstance(evaluated, tuple) and len(evaluated) >= 3:
+                        metrics = evaluated[2]
+                if metrics:
+                    log_info(f"Success metrics: {_report_value(metrics)}")
 
             if not valid:
                 _, _ = env.reset(options={"save_data": False})
@@ -133,6 +157,7 @@ def _generate_until_saved_episode_target(args, env, gym_config, num_traj: int) -
             debug_mode=getattr(args, "debug_mode", False),
             reset_first=False,
             regenerate=getattr(args, "regenerate", False),
+            report_task_success=getattr(args, "report_task_success", False),
         )
 
         saved_before_reset = _get_saved_episode_count(env)
@@ -192,9 +217,11 @@ def run_env_main(args, env, gym_config):
             save_video=getattr(args, "save_video", False),
             debug_mode=getattr(args, "debug_mode", False),
             regenerate=getattr(args, "regenerate", False),
+            report_task_success=getattr(args, "report_task_success", False),
         )
 
-    _, _ = env.reset()
+    if not getattr(args, "report_task_success", False):
+        _, _ = env.reset()
 
 
 if __name__ == "__main__":
@@ -221,6 +248,11 @@ if __name__ == "__main__":
         choices=["kinematic", "dynamic", "control"],
         default="kinematic",
         help="Replay mode (default: kinematic).",
+    )
+    parser.add_argument(
+        "--report_task_success",
+        action="store_true",
+        help="Log the task success predicate after each expert rollout.",
     )
 
     args = parser.parse_args()
