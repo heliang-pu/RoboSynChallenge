@@ -1,11 +1,11 @@
 # 并行评估（`num_envs > 1`）
 
-`scripts/eval_policy.py` 支持在**单进程内同时跑 N 个环境**做评估（wave 批次模式），
+`scripts/eval_policy_parallel.py` 支持在**单进程内同时跑 N 个环境**做评估（wave 批次模式），
 利用 EmbodiChain/DexSim 的多 arena 批量仿真（PhysX GPU 物理 + camera group 批量渲染）。
 与既有的 `num_shards`/`shard_index` 多进程分片正交，两者可叠加。
 
 ```bash
-python scripts/eval_policy.py --config policy/act/deploy_policy.yml \
+python scripts/eval_policy_parallel.py --config policy/act/deploy_policy.yml \
     --overrides --task_name click_bell --setting random \
     --max_episodes 100 --num_envs 8 --device cuda --headless True
 ```
@@ -109,7 +109,7 @@ python scripts/eval_policy.py --config policy/act/deploy_policy.yml \
 
 ## 实现位置
 
-- `scripts/eval_policy.py`：`ParallelEvalProxy`（裁判代理）、
+- `scripts/eval_policy_parallel.py`：`ParallelEvalProxy`（裁判代理）、
   `run_parallel_episodes`（wave 循环）、`settle_after_wave_reset`；
   `main()` 里 `num_envs > 1` 分支。串行循环体保持原样。
 - 依赖的 EmbodiChain 机制：`EnvCfg.num_envs`（`make_env_from_configs` 已透传）、
@@ -137,5 +137,5 @@ python scripts/eval_policy.py --config policy/act/deploy_policy.yml \
 DexSim 在 `env.close()` → `sim.destroy()` 时直接退出进程，开关是环境变量
 **`EMBODICHAIN_SIM_EXIT_PROCESS`**（设 `0` 则不退出，改为把清理排队，
 由顶层 `SimulationManager.flush_cleanup_queue()` 执行——origin/main 的
-`scripts/run_env.py` 已按此写法收尾）。本分支把指标落盘挪到 close 之前的修复
+`scripts/run_env_seeded.py` 已按此写法收尾）。本分支把指标落盘挪到 close 之前的修复
 与之兼容：不设该变量时进程在落盘后退出，设了也能正常返回。

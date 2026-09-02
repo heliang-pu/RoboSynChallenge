@@ -15,7 +15,7 @@
 ## 采集
 
 ```bash
-python -m scripts.run_env \
+python -m scripts.run_env_seeded \
     --gym_config configs/drawer_open_place/coverage_strat_drawer10/gym_config.json \
     --action_config configs/drawer_open_place/action_config.json \
     --num_envs 1 --max_episodes 37 --headless --report_task_success

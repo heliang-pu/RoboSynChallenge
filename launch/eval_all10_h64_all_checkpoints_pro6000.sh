@@ -499,7 +499,7 @@ PY
 
 main() {
     [[ -x "$python_bin" ]] || { echo "python missing: $python_bin" >&2; exit 2; }
-    [[ -f "$repo/scripts/eval_policy.py" ]] || { echo "repo incomplete: $repo" >&2; exit 2; }
+    [[ -f "$repo/scripts/eval_policy_parallel.py" ]] || { echo "repo incomplete: $repo" >&2; exit 2; }
     [[ "$worker_count" =~ ^[1-9][0-9]*$ ]] || { echo "invalid workers: $worker_count" >&2; exit 2; }
     mkdir -p "${ALL10_EVAL_JAX_CACHE:-/workspace/shared/.cache/jax-all10-eval}" "$cache_root"
     write_manifest

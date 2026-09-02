@@ -17,7 +17,7 @@
 ## 采集
 
 ```bash
-python -m scripts.run_env \
+python -m scripts.run_env_seeded \
     --gym_config configs/handle_basket/coverage_strat_milk00_basket01/gym_config.json \
     --action_config configs/handle_basket/action_config.json \
     --num_envs 1 --max_episodes 32 --headless --report_task_success

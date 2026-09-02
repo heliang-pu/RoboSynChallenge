@@ -333,7 +333,7 @@ def write_readme(
         "## 采集",
         "",
         "```bash",
-        "python -m scripts.run_env \\",
+        "python -m scripts.run_env_seeded \\",
         f"    --gym_config configs/{task}/{name}/gym_config.json \\",
         f"    --action_config configs/{task}/action_config.json \\",
         f"    --num_envs 1 --max_episodes {rec['episodes']} --headless --report_task_success",
