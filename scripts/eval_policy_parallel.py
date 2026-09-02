@@ -832,7 +832,7 @@ def make_env_from_configs(config, gym_config_dict, action_config_dict):
     _set_default(gym_config, "headless", bool(config.get("headless", False)))
     # 渲染器默认跟随 EmbodiChain 的 auto 规则:RTX 卡 -> hybrid(行为不变),
     # A100/H100 等数据中心卡 -> fast-rt(实测 hybrid 在 A100 上只有 2 step/s)。
-    _set_default(gym_config, "renderer", config.get("renderer", "auto"))
+    _set_default(gym_config, "renderer", config.get("renderer", "hybrid"))  # 与官方脚本一致；A100/H100 等无 RT core 的卡需显式 --renderer auto
     _set_default(gym_config, "gpu_id", int(config.get("gpu_id", 0)))
     _set_default(gym_config, "arena_space", float(config.get("arena_space", 5.0)))
     # 不带索引的 "cuda" 在多卡机上会让部分张量落到 cuda:0:gpu_id≠0 时直接
