@@ -22,7 +22,7 @@ for entry in "${COLLECTION_GROUPS[@]}"; do
     setting=${entry%%:*}
     episodes=${entry##*:}
     echo "Starting $setting ($episodes episodes)"
-    "$PYTHON_BIN" -m scripts.run_env \
+    "$PYTHON_BIN" -m scripts.run_env_seeded \
         --gym_config "configs/sample_loading/$setting/gym_config.json" \
         --action_config configs/sample_loading/action_config.json \
         --num_envs 1 --max_episodes "$episodes" --headless \

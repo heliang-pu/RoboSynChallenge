@@ -19,7 +19,7 @@
 ## 采集
 
 ```bash
-python -m scripts.run_env \
+python -m scripts.run_env_seeded \
     --gym_config configs/table_rearrangement/coverage_strat_fork00_spoon00/gym_config.json \
     --action_config configs/table_rearrangement/action_config.json \
     --num_envs 1 --max_episodes 32 --headless --report_task_success

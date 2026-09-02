@@ -116,4 +116,4 @@ assets 推出 `SIMRECAP_REPO_ID`),`03_build_pool.sh sample_loading round2 lerobo
 
 - Evo-RL 收编说明:`third_party/evo_rl/VENDORED.md`;打标语义:任务内全帧混算 top-30%,`force_intervention_positive` 在仿真数据上是 no-op。
 - π\*0.6 论文(arXiv 2511.14759):同样的分位规则,迭代阶段比例 ~40%;人工纠正帧强制为正(仿真无此项)。
-- 组件代码:`scripts/eval_policy.py --rollout_save`、`scripts/label_rollout_dataset.py`、`policy/pi05/src/openpi/policies/libero_policy.py` 的 `ACPAdvantageTag`、`policy/pi05/src/openpi/training/config.py` 的 `pi05_sim_recap`(环境变量驱动)。
+- 组件代码:`scripts/eval_policy_parallel.py --rollout_save`、`scripts/label_rollout_dataset.py`、`policy/pi05/src/openpi/policies/libero_policy.py` 的 `ACPAdvantageTag`、`policy/pi05/src/openpi/training/config.py` 的 `pi05_sim_recap`(环境变量驱动)。

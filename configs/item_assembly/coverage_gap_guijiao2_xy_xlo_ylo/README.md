@@ -19,7 +19,7 @@
 ## 采集
 
 ```bash
-python -m scripts.run_env \
+python -m scripts.run_env_seeded \
     --gym_config configs/item_assembly/coverage_gap_guijiao2_xy_xlo_ylo/gym_config.json \
     --action_config configs/item_assembly/action_config.json \
     --num_envs 1 --max_episodes 55 --headless --report_task_success

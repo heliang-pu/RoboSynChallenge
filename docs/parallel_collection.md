@@ -1,16 +1,16 @@
 # 并行专家数据采集（`num_envs > 1`）
 
-`scripts/run_env.py` 支持单进程多环境的专家演示采集（wave 批次模式）。
+`scripts/run_env_seeded.py` 支持单进程多环境的专家演示采集（wave 批次模式）。
 执行/渲染/录制吃 EmbodiChain 的多 arena 批量能力，专家**规划**放在一个
 单环境 worker 子进程里逐 episode 做——两边用同一个 seed，场景逐位一致。
 
 ```bash
-# 直接跑(注意 --num_envs 会覆盖 run_task.sh 里写死的 1,argparse 取末次出现)
-bash launch/run_task.sh click_bell random 3_0 --max_episodes 100 --headless \
+# 直接跑(注意 --num_envs 会覆盖 run_task_seeded.sh 里写死的 1,argparse 取末次出现)
+bash launch/run_task_seeded.sh click_bell random 3_0 --max_episodes 100 --headless \
     --num_envs 4 --device cuda --seed 7 --save_only_success --success_settle_steps 30
 
-# 或绕过 run_task.sh:
-python -m scripts.run_env \
+# 或绕过 run_task_seeded.sh:
+python -m scripts.run_env_seeded \
     --gym_config configs/click_bell/random/gym_config.json \
     --action_config configs/click_bell/action_config.json \
     --num_envs 4 --device cuda --headless --seed 7 \

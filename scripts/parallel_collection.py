@@ -125,7 +125,7 @@ class ExpertPlanWorker:
 
 
 def _get_saved_episode_count(env):
-    """recorder 的全局已存集数(与 scripts/run_env.py 同款,复制避免循环导入)。"""
+    """recorder 的全局已存集数(与 scripts/run_env_seeded.py 同款,复制避免循环导入)。"""
     dataset_manager = getattr(getattr(env, "unwrapped", env), "dataset_manager", None)
     if dataset_manager is None:
         return None

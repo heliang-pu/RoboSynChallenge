@@ -51,7 +51,7 @@ RUN_LOG="$LOG_DIR/${TASK_NAME}_${SETTING}_${EPISODES}_${RUN_ID}.log"
 
 echo "[collect] generating isolated v3.0 candidate; log: $RUN_LOG"
 set +e
-bash "$SCRIPT_DIR/run_task.sh" "$TASK_NAME" "$SETTING" 3_0 \
+bash "$SCRIPT_DIR/run_task_seeded.sh" "$TASK_NAME" "$SETTING" 3_0 \
     --max_episodes "$EPISODES" --headless "$@" 2>&1 | tee "$RUN_LOG"
 RUN_STATUS=${PIPESTATUS[0]}
 set -e

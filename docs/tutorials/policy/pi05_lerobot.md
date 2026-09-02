@@ -23,7 +23,7 @@ RoboSynChallenge_ws/
 This policy needs **two** Python environments, and that is deliberate:
 
 - the simulator side is pinned to Python 3.11 (the repo-root `.venv`) and runs
-  EmbodiChain plus `scripts/eval_policy.py`;
+  EmbodiChain plus `scripts/eval_policy_parallel.py`;
 - LeRobot requires Python ≥ 3.12 and transformers v5, so the π₀.₅ checkpoint is
   loaded by `pi05_worker.py` in its own environment.
 

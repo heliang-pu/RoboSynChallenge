@@ -73,7 +73,7 @@ echo "========================================="
 # Execute the Python script, keeping default parameters from the original scripts
 # Extract original extra arguments, such as --filter_visual_rand
 RUN_CMD=(
-    python -m scripts.run_env
+    python -m scripts.run_env_seeded
     --gym_config "$GYM_CONFIG"
     --action_config "$ACTION_CONFIG"
     --num_envs 1
@@ -86,6 +86,11 @@ echo "${RUN_CMD[@]}"
 echo "========================================="
 
 "${RUN_CMD[@]}"
+RUN_STATUS=$?
+if [ "$RUN_STATUS" -ne 0 ]; then
+    echo -e "\033[1;31mData generation failed with exit code $RUN_STATUS; stopping before conversion or post-processing.\033[0m" >&2
+    exit "$RUN_STATUS"
+fi
 sleep 5;
 
 if [ "$FORMAT" == "2_1" ]; then
@@ -114,4 +119,3 @@ if [ "$FORMAT" == "2_1" ]; then
     fi
 fi
 chmod 777 -R "$REPO_ROOT/lerobot_dataset/"
-
