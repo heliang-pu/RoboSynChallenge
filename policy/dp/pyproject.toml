@@ -1,29 +1,62 @@
+# =============================================================================
+# Diffusion Policy (DP) 独立 uv 环境
+# =============================================================================
+#
+# 安装方式(按需选择,不要全仓库统一装):
+#
+#   只训练(clone 本仓库即可,无需任何私有资源):
+#     cd policy/dp && uv sync
+#     # 或者什么都不装,直接 bash finetune.sh ...(内部用 uv run --frozen,
+#     # 首次运行会按 uv.lock 自动创建环境)
+#
+#   训练 + 仿真评估(eval.sh,额外要求见下):
+#     cd policy/dp && uv sync --extra sim
+#     前置: 1) EmbodiChain 仓库 clone 在本仓库同级目录(../../../EmbodiChain)
+#           2) 有 dexsim-engine 私有 pip 源(open3dv)的访问权限
+#
+#   改动本文件后需要重新锁定: uv lock(同样需要上面两个前置条件,
+#   因为锁定时会解析 sim extra;没有条件的用户请不要改依赖后重锁,
+#   直接用仓库自带的 uv.lock + --frozen)。
+# =============================================================================
+
 [project]
 name = "robosynchallenge-dp"
 version = "0.1.0"
 description = "LeRobot Diffusion Policy integration for RoboSynChallenge"
 requires-python = ">=3.10,<3.12"
+
+# ---- 训练/推理核心依赖(全部公开源,任何人 clone 后可装) ----
 dependencies = [
-    "lerobot",
-    "embodichain",
-    "robosynchallenge",
+    "lerobot",                          # 版本由下方 git rev 锁定
     "numpy>=1.22.4,<2.0.0",
     "pyyaml>=6.0",
     "torch>=2.2.1,<2.8.0",
     "torchvision>=0.21.0,<0.23.0",
-    "av>=14.2.0",
-    "dexsim-engine==0.4.3",
+    "av>=14.2.0",                       # LeRobot 视频解码
+]
+
+# ---- 可选依赖:仿真评估(eval.sh 需要;只训练则不用装) ----
+[project.optional-dependencies]
+sim = [
+    "embodichain",                      # 仿真框架,本地路径(见 tool.uv.sources)
+    "robosynchallenge",                 # 本仓库根包(任务配置/评估协议)
+    "dexsim-engine==0.4.3",             # 闭源仿真引擎,私有源,需要权限
 ]
 
 [tool.uv]
+# 私有源走 http,必须显式放行
 allow-insecure-host = ["pyp.open3dv.site:2345"]
+# embodichain 声明 lerobot>=0.4.4,与本项目 pin 的 git 版本冲突;
+# 这里去掉所有包对 lerobot 的版本约束,统一用 git rev 那份。
 override-dependencies = [
     "lerobot",
     "dexsim-engine==0.4.3",
 ]
 
 [tool.uv.sources]
+# lerobot 固定到特定 commit,保证训练/推理行为可复现
 lerobot = { git = "https://github.com/huggingface/lerobot", rev = "b883328e6c95681ca90a18b102e4ae5e1f91e2bf" }
+# EmbodiChain 必须 clone 在本仓库同级目录(仅安装 sim extra 时需要存在)
 embodichain = { path = "../../../EmbodiChain", editable = true }
 robosynchallenge = { path = "../..", editable = true }
 dexsim-engine = { index = "open3dv" }

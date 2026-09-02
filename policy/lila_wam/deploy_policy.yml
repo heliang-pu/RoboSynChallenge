@@ -1,0 +1,48 @@
+# LiLa-WAM Policy Evaluation Configuration
+# python scripts/eval_policy.py --config policy/lila_wam/deploy_policy.yml
+
+# ------------------------------------------------------------------
+# Basic experiment configuration (Each policy must be retained.)
+# ------------------------------------------------------------------
+policy_name: lila_wam
+task_name: null
+setting: null
+model_name: null
+seed: 0
+max_episodes: 20
+max_steps: 1000
+headless: false
+pytorch_device: cuda
+filter_dataset_saving: true
+eval_video_log: true
+eval_video_obs_keys:
+  - cam_high
+  - cam_right_wrist
+  - cam_left_wrist
+eval_reset_sync_steps: 1
+
+# ------------------------------------------------------------------
+# LiLa-WAM parameters used by get_model()
+# ------------------------------------------------------------------
+# Training run directory (or a single checkpoint_epoch_N.pt inside one).
+# Pointing at the directory picks the highest epoch, and config.yaml /
+# norm_stats.json are read from next to it.
+checkpoint_path: null
+
+# Only needed when the checkpoint sits apart from its run directory.
+config_path: null
+norm_stats_path: null
+
+# VTT vectors written by precompute_task_cond.py. null -> dataset.task_cond_dir
+# from the training config. The vector is looked up by task_cond_name, which
+# defaults to task_name -- override it when the checkpoint was trained on a
+# dataset registered under a different task name.
+task_cond_dir: null
+task_cond_name: null
+
+state_obs_path: robot/qpos
+strict_action_dim: true
+
+# null -> use the values baked into the training config
+action_execution_horizon: null
+num_inference_steps: null

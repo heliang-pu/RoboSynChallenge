@@ -1,0 +1,4 @@
+interface:
+  display_name: "sim-RECAP round"
+  short_description: "Rollout → value function → advantage labels → v2.1 datasets → ACP fine-tune"
+  default_prompt: "Use $sim-recap to run the next sim-RECAP round for <task>."

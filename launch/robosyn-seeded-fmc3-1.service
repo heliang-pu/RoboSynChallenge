@@ -1,0 +1,19 @@
+[Unit]
+Description=RoboSyn seeded collectors assigned to fmc3-1
+After=default.target
+RefuseManualStop=yes
+
+[Service]
+Type=simple
+WorkingDirectory=/home/fmc3/workspace/coverage/RoboSynChallenge
+Environment=WAIT_PROCESS_PATTERN=run_yolo5_pseudolabel_training.py|watch_yolo_stage_run_contract.py|yolo5_final_distilled_h_joint_v2_s_to_m_watcher
+Environment=PATH=/home/fmc3/workspace/conda-envs/robosyn/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONPATH=/home/fmc3/workspace/coverage/RoboSynChallenge:/home/fmc3/workspace/EmbodiChain:/home/fmc3/workspace/EmbodiChain/embodichain_tasks
+Environment=PYTHON_BIN=/home/fmc3/workspace/conda-envs/robosyn/bin/python
+Environment=NAS_ROOT=/home/fmc3/FermiBotNas/dataset/RoboSynChallenge/Syn/seeded_1000_20260827
+ExecStart=/bin/bash launch/run_seeded_1000_assigned.sh manipulate_pipette table_rearrangement water_pouring
+Restart=always
+RestartSec=10s
+
+[Install]
+WantedBy=default.target

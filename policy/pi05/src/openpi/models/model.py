@@ -1,3 +1,4 @@
+import os
 import abc
 from collections.abc import Sequence
 import dataclasses
@@ -307,7 +308,14 @@ def restore_params(
     params_path = pathlib.Path(params_path).resolve() if not str(params_path).startswith("gs://") else params_path
 
     if restore_type is jax.Array and sharding is None:
-        mesh = jax.sharding.Mesh(jax.devices(), ("x",))
+        # 默认把参数复制到全部可见设备。多卡机上做单卡评估时,别的卡可能正被
+        # 训练进程占满,复制过去会 OOM。OPENPI_SINGLE_DEVICE 指定只用某一张
+        # (索引对应 jax.devices());不设时行为与原来完全一致。
+        _devs = jax.devices()
+        _single = os.environ.get("OPENPI_SINGLE_DEVICE")
+        if _single is not None and _single.strip().isdigit() and 0 <= int(_single) < len(_devs):
+            _devs = [_devs[int(_single)]]
+        mesh = jax.sharding.Mesh(_devs, ("x",))
         sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec())
 
     with ocp.PyTreeCheckpointer() as ckptr:

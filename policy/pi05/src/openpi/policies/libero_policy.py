@@ -100,6 +100,68 @@ class LiberoOutputs(transforms.DataTransformFn):
         return {"actions": np.asarray(data["actions"][:, :7])}
 
 @dataclasses.dataclass(frozen=True)
+class ACPAdvantageTag(transforms.DataTransformFn):
+    """sim-RECAP: turn a per-frame advantage indicator into a prompt text tag.
+
+    Follows Evo-RL's ACP convention exactly: the task prompt gets
+    "\\nAdvantage: positive" or "\\nAdvantage: negative" appended.
+
+    Training path: the repack transform maps the dataset indicator column to
+    "acp_indicator"; a 0/1 value selects the tag, and with ``dropout_prob``
+    the tag is omitted so the model also learns the untagged condition.
+
+    Inference path: no indicator key exists in the request, so the positive
+    tag is appended unconditionally — deployment always asks for
+    better-than-baseline behavior. No deploy-side changes are needed.
+    """
+
+    dropout_prob: float = 0.3
+
+    def __call__(self, data: dict) -> dict:
+        prompt = data.get("prompt")
+        if prompt is None:
+            return data
+        if isinstance(prompt, bytes):
+            prompt = prompt.decode("utf-8")
+        prompt = str(prompt)
+
+        baked_indicator = None
+        if prompt == "Advantage: positive" or prompt.endswith("\nAdvantage: positive"):
+            baked_indicator = 1
+        elif prompt == "Advantage: negative" or prompt.endswith("\nAdvantage: negative"):
+            baked_indicator = 0
+
+        if "acp_indicator" in data:
+            indicator = int(np.asarray(data.pop("acp_indicator")).reshape(-1)[0])
+            if indicator not in (0, 1):
+                raise ValueError(f"acp_indicator must be 0/1, got {indicator}")
+            if baked_indicator is not None:
+                if baked_indicator != indicator:
+                    raise ValueError(
+                        "Baked prompt advantage tag disagrees with acp_indicator: "
+                        f"prompt={baked_indicator}, indicator={indicator}"
+                    )
+                # A baked dataset stores the tag in tasks.parquet. Apply the
+                # same stochastic training dropout by removing that suffix,
+                # instead of appending a second copy of the tag.
+                if self.dropout_prob > 0.0 and np.random.rand() < self.dropout_prob:
+                    suffix = "Advantage: positive" if indicator == 1 else "Advantage: negative"
+                    data["prompt"] = prompt.removesuffix(suffix).removesuffix("\n")
+                return data
+            if self.dropout_prob > 0.0 and np.random.rand() < self.dropout_prob:
+                data["prompt"] = prompt  # drop the tag for this sample
+                return data
+            tag = "Advantage: positive" if indicator == 1 else "Advantage: negative"
+        else:
+            if baked_indicator is not None:
+                return data
+            tag = "Advantage: positive"
+
+        data["prompt"] = f"{prompt}\n{tag}" if prompt else tag
+        return data
+
+
+@dataclasses.dataclass(frozen=True)
 class EmbodiChainInputs(transforms.DataTransformFn):
     """
     This class is used to convert inputs to the model to the expected format. It is used for both training and inference.

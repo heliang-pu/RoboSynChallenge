@@ -15,6 +15,7 @@ members = [
 ]
 overrides = [
     { name = "av", specifier = "==15.1.0" },
+    { name = "dexsim-engine", specifier = "==0.4.1", index = "http://pyp.open3dv.site:2345/simple/" },
     { name = "lerobot", git = "https://github.com/huggingface/lerobot?rev=0cf864870cf29f4738d3ade893e6fd13fbd7cdb5" },
     { name = "ml-dtypes", specifier = "==0.4.1" },
     { name = "tensorboard", specifier = ">=2.15,<2.16" },
@@ -152,8 +153,8 @@ name = "array-record"
 version = "0.7.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "absl-py", marker = "sys_platform != 'darwin' and sys_platform != 'emscripten'" },
-    { name = "etils", extra = ["epath"], marker = "sys_platform != 'darwin' and sys_platform != 'emscripten'" },
+    { name = "absl-py" },
+    { name = "etils", extra = ["epath"] },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/da/9e/df7e365bb7516b90709964bd7ca851ad03276a3b33331939bed5cb6d9377/array_record-0.7.2-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:9426431053276e61c9c952393ff37c80825b4edc2fde32aee18b8dc0d653f19c", size = 2135376, upload-time = "2025-04-29T15:26:34.445Z" },
@@ -1088,13 +1089,17 @@ requires-dist = [
     { name = "black", specifier = "==26.3.1" },
     { name = "bpy", marker = "extra == 'gensim'", index = "https://download.blender.org/pypi/" },
     { name = "casadi" },
-    { name = "dexsim-engine", specifier = "==0.4.1" },
+    { name = "dexsim-engine", specifier = "==0.4.3" },
     { name = "fvcore" },
     { name = "gymnasium", specifier = ">=0.29.1" },
     { name = "h5py" },
     { name = "langchain" },
     { name = "langchain-openai" },
     { name = "lerobot", specifier = ">=0.4.4" },
+    { name = "nvidia-curobo", extras = ["cu12"], marker = "extra == 'curobo-cu12'", git = "https://github.com/NVlabs/curobo.git?rev=v0.8.0" },
+    { name = "nvidia-curobo", extras = ["cu12-torch"], marker = "extra == 'curobo-cu12-torch'", git = "https://github.com/NVlabs/curobo.git?rev=v0.8.0" },
+    { name = "nvidia-curobo", extras = ["cu13"], marker = "extra == 'curobo-cu13'", git = "https://github.com/NVlabs/curobo.git?rev=v0.8.0" },
+    { name = "nvidia-curobo", extras = ["cu13-torch"], marker = "extra == 'curobo-cu13-torch'", git = "https://github.com/NVlabs/curobo.git?rev=v0.8.0" },
     { name = "ortools" },
     { name = "pin" },
     { name = "pin-pink" },
@@ -1111,7 +1116,7 @@ requires-dist = [
     { name = "viser", specifier = "==1.0.21" },
     { name = "wandb", specifier = ">=0.21.0" },
 ]
-provides-extras = ["gensim"]
+provides-extras = ["gensim", "curobo-cu12", "curobo-cu12-torch", "curobo-cu13", "curobo-cu13-torch"]
 
 [[package]]
 name = "embreex"
@@ -3257,10 +3262,8 @@ source = { editable = "." }
 dependencies = [
     { name = "augmax" },
     { name = "beartype" },
-    { name = "dexsim-engine" },
     { name = "dm-tree" },
     { name = "einops" },
-    { name = "embodichain" },
     { name = "equinox" },
     { name = "filelock" },
     { name = "flatbuffers" },
@@ -3280,7 +3283,6 @@ dependencies = [
     { name = "pillow" },
     { name = "polars" },
     { name = "rich" },
-    { name = "robosynchallenge" },
     { name = "sentencepiece" },
     { name = "torch" },
     { name = "tqdm-loggable" },
@@ -3289,6 +3291,13 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "tyro" },
     { name = "wandb" },
+]
+
+[package.optional-dependencies]
+sim = [
+    { name = "dexsim-engine" },
+    { name = "embodichain" },
+    { name = "robosynchallenge" },
 ]
 
 [package.dev-dependencies]
@@ -3311,10 +3320,10 @@ rlds = [
 requires-dist = [
     { name = "augmax", specifier = ">=0.3.4" },
     { name = "beartype", specifier = "==0.19.0" },
-    { name = "dexsim-engine", specifier = "==0.4.1", index = "http://pyp.open3dv.site:2345/simple/" },
+    { name = "dexsim-engine", marker = "extra == 'sim'", specifier = "==0.4.1", index = "http://pyp.open3dv.site:2345/simple/" },
     { name = "dm-tree", specifier = ">=0.1.8" },
     { name = "einops", specifier = ">=0.8.0" },
-    { name = "embodichain", editable = "../../../EmbodiChain" },
+    { name = "embodichain", marker = "extra == 'sim'", editable = "../../../EmbodiChain" },
     { name = "equinox", specifier = ">=0.11.8" },
     { name = "filelock", specifier = ">=3.16.1" },
     { name = "flatbuffers", specifier = ">=24.3.25" },
@@ -3334,7 +3343,7 @@ requires-dist = [
     { name = "pillow", specifier = ">=11.0.0" },
     { name = "polars", specifier = ">=1.30.0" },
     { name = "rich", specifier = ">=14.0.0" },
-    { name = "robosynchallenge", editable = "../../" },
+    { name = "robosynchallenge", marker = "extra == 'sim'", editable = "../../" },
     { name = "sentencepiece", specifier = ">=0.2.0" },
     { name = "torch", specifier = "==2.7.1" },
     { name = "tqdm-loggable", specifier = ">=0.2" },
@@ -3344,6 +3353,7 @@ requires-dist = [
     { name = "tyro", specifier = ">=0.9.5" },
     { name = "wandb", specifier = ">=0.19.1" },
 ]
+provides-extras = ["sim"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -3582,7 +3592,7 @@ name = "pexpect"
 version = "4.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ptyprocess", marker = "sys_platform != 'emscripten'" },
+    { name = "ptyprocess" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/42/92/cc564bf6381ff43ce1f4d06852fc19a2f11d180f23dc32d9588bee2f149d/pexpect-4.9.0.tar.gz", hash = "sha256:ee7d41123f3c9911050ea2c2dac107568dc43b2d3b0c7557a33212c398ead30f", size = 166450, upload-time = "2023-11-25T09:07:26.339Z" }
 wheels = [
@@ -4148,10 +4158,10 @@ name = "pyobjc-framework-applicationservices"
 version = "11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pyobjc-core", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-coretext", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-core" },
+    { name = "pyobjc-framework-cocoa" },
+    { name = "pyobjc-framework-coretext" },
+    { name = "pyobjc-framework-quartz" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ba/fb/4e42573b0d3baa3fa18ec53614cf979f951313f1451e8f2e17df9429da1f/pyobjc_framework_applicationservices-11.0.tar.gz", hash = "sha256:d6ea18dfc7d5626a3ecf4ac72d510405c0d3a648ca38cae8db841acdebecf4d2", size = 224334, upload-time = "2025-01-14T19:02:26.828Z" }
 wheels = [
@@ -4163,7 +4173,7 @@ name = "pyobjc-framework-cocoa"
 version = "11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pyobjc-core", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-core" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c5/32/53809096ad5fc3e7a2c5ddea642590a5f2cb5b81d0ad6ea67fdb2263d9f9/pyobjc_framework_cocoa-11.0.tar.gz", hash = "sha256:00346a8cb81ad7b017b32ff7bf596000f9faa905807b1bd234644ebd47f692c5", size = 6173848, upload-time = "2025-01-14T19:03:00.125Z" }
 wheels = [
@@ -4175,9 +4185,9 @@ name = "pyobjc-framework-coretext"
 version = "11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pyobjc-core", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-core" },
+    { name = "pyobjc-framework-cocoa" },
+    { name = "pyobjc-framework-quartz" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9d/e8/9b68dc788828e38143a3e834e66346713751cb83d7f0955016323005c1a2/pyobjc_framework_coretext-11.0.tar.gz", hash = "sha256:a68437153e627847e3898754dd3f13ae0cb852246b016a91f9c9cbccb9f91a43", size = 274222, upload-time = "2025-01-14T19:03:21.521Z" }
 wheels = [
@@ -4189,8 +4199,8 @@ name = "pyobjc-framework-quartz"
 version = "11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pyobjc-core", marker = "sys_platform == 'darwin'" },
-    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-core" },
+    { name = "pyobjc-framework-cocoa" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a5/ad/f00f3f53387c23bbf4e0bb1410e11978cbf87c82fa6baff0ee86f74c5fb6/pyobjc_framework_quartz-11.0.tar.gz", hash = "sha256:3205bf7795fb9ae34747f701486b3db6dfac71924894d1f372977c4d70c3c619", size = 3952463, upload-time = "2025-01-14T19:05:07.931Z" }
 wheels = [
@@ -5476,7 +5486,7 @@ name = "triton"
 version = "3.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "setuptools", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'emscripten' and sys_platform != 'linux')" },
+    { name = "setuptools" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/21/2f/3e56ea7b58f80ff68899b1dbe810ff257c9d177d288c6b0f55bf2fe4eb50/triton-3.3.1-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b31e3aa26f8cb3cc5bf4e187bf737cbacf17311e1112b781d4a059353dfd731b", size = 155689937, upload-time = "2025-05-29T23:39:44.182Z" },
@@ -5617,8 +5627,8 @@ name = "uvicorn"
 version = "0.49.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "click", marker = "sys_platform != 'emscripten'" },
-    { name = "h11", marker = "sys_platform != 'emscripten'" },
+    { name = "click" },
+    { name = "h11" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c4/1f/fa18009dea8469069cca78a4e877a008ab78f08b064bfc9ab891579077ff/uvicorn-0.49.0.tar.gz", hash = "sha256:ebf4271aa580d9de97f93192d4595176df6e91f9aae919ca73e4fc07df1e66a3", size = 91284, upload-time = "2026-06-03T22:01:30.448Z" }
 wheels = [

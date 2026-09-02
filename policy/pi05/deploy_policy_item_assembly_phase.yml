@@ -1,0 +1,42 @@
+# π0.5 item_assembly phase-aware action-chunk experiment.
+# Invoke through scripts/eval_policy.py and provide the checkpoint fields below.
+
+policy_name: pi05
+task_name: item_assembly
+setting: random
+model_name: null
+train_config_name: null
+checkpoint_id: 30000
+
+seed: 0
+max_episodes: 100
+max_steps: 1000
+headless: true
+pytorch_device: cuda
+filter_dataset_saving: true
+eval_video_log: true
+eval_video_obs_key: cam_high
+
+# Fallback only; phase_action_chunks controls the effective execution horizon.
+pi0_step: 10
+phase_action_chunks:
+  - name: approach_and_grasp
+    start_step: 0
+    end_step: 160
+    chunk: 10
+  - name: transport
+    start_step: 160
+    end_step: 240
+    chunk: 5
+  - name: align_and_insert
+    start_step: 240
+    chunk: 2
+
+# Dynamic phase chunking is initially kept synchronous so a phase transition
+# cannot race an in-flight inference. Benchmark RTC separately after this A/B.
+async_mode: "off"
+inference_delay: 0
+rtc: false
+prefix_attention_schedule: exp
+max_guidance_weight: 10.0
+rtc_correction: vjp

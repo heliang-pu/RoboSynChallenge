@@ -45,6 +45,7 @@ import openpi.models_pytorch.pi0_pytorch
 import openpi.shared.normalize as _normalize
 import openpi.training.config as _config
 import openpi.training.data_loader as _data
+import openpi.training.provenance as _provenance
 
 
 def init_logging():
@@ -181,6 +182,13 @@ def save_checkpoint(model, optimizer, global_step, config, is_main, data_config)
         norm_stats = data_config.norm_stats
         if norm_stats is not None and data_config.asset_id is not None:
             _normalize.save(tmp_ckpt_dir / "assets" / data_config.asset_id, norm_stats)
+
+        _provenance.write_provenance(
+            tmp_ckpt_dir / "assets" / "provenance",
+            config,
+            data_config,
+            checkpoint_step=global_step,
+        )
 
         # Atomically move temp directory to final location
         if final_ckpt_dir.exists():
@@ -357,6 +365,14 @@ def train_loop(config: _config.TrainConfig):
 
     # Pass the original batch size to data loader - it will handle DDP splitting internally
     loader, data_config = build_datasets(config)
+    if is_main:
+        provenance_dir = _provenance.write_provenance(
+            config.checkpoint_dir / "provenance",
+            config,
+            data_config,
+            preserve_existing=resuming,
+        )
+        logging.info(f"Saved training provenance to {provenance_dir}")
 
     # Log sample images to wandb on first batch
     if is_main and config.wandb_enabled and not resuming:

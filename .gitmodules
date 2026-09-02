@@ -7,3 +7,6 @@
 [submodule "policy/xr1/Xiaomi-Robotics-1"]
 	path = policy/xr1/Xiaomi-Robotics-1
 	url = https://github.com/XiaomiRobotics/Xiaomi-Robotics-1
+[submodule "policy/lila_wam/LiLa-WAM"]
+	path = policy/lila_wam/LiLa-WAM
+	url = https://github.com/teee000/LiLa-WAM.git

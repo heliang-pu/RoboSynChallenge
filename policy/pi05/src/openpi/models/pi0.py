@@ -9,6 +9,7 @@ from typing_extensions import override
 
 from openpi.models import model as _model
 from openpi.models import pi0_config
+from openpi.models import rtc as _rtc
 import openpi.models.gemma as _gemma
 import openpi.models.siglip as _siglip
 from openpi.shared import array_typing as at
@@ -221,7 +222,27 @@ class Pi0(_model.BaseModel):
         *,
         num_steps: int | at.Int[at.Array, ""] = 10,
         noise: at.Float[at.Array, "b ah ad"] | None = None,
+        prev_chunk: at.Float[at.Array, "b ah ad"] | None = None,
+        prefix_weights: at.Float[at.Array, " ah"] | None = None,
+        max_guidance_weight: float = 10.0,
+        rtc_correction: str = "vjp",
     ) -> _model.Actions:
+        """Sample an action chunk, optionally with Real-Time Chunking guidance.
+
+        When both `prev_chunk` and `prefix_weights` are given, the sampler is
+        guided so that the new chunk's prefix agrees with the chunk currently
+        being executed (see `openpi.models.rtc`).  `prev_chunk` must already be
+        aligned to the new chunk's timeline -- `prev_chunk[:, i]` is the
+        previously planned action for the same timestep as `x_t[:, i]` -- and
+        zero-padded wherever the old chunk has run out.  Leave both as `None` for
+        stock open-loop behaviour.
+
+        `rtc_correction` selects how the inpainting error is propagated back to
+        `x_t`.  `"vjp"` differentiates through the denoiser, which is what the
+        paper specifies, at the cost of one extra backward pass per integration
+        step.  `"identity"` approximates d(x_t - t*v_t)/d(x_t) as the identity,
+        which is cheaper and reproduces the LeRobot reference port.
+        """
         observation = _model.preprocess_observation(None, observation, train=False)
         # note that we use the convention more common in diffusion literature, where t=1 is noise and t=0 is the target
         # distribution. yes, this is the opposite of the pi0 paper, and I'm sorry.
@@ -230,14 +251,17 @@ class Pi0(_model.BaseModel):
         if noise is None:
             noise = jax.random.normal(rng, (batch_size, self.action_horizon, self.action_dim))
 
+        use_rtc = prev_chunk is not None and prefix_weights is not None
+        if use_rtc and rtc_correction not in ("vjp", "identity"):
+            raise ValueError(f"rtc_correction must be 'vjp' or 'identity', got {rtc_correction!r}")
+
         # first fill KV cache with a forward pass of the prefix
         prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
         prefix_attn_mask = make_attn_mask(prefix_mask, prefix_ar_mask)
         positions = jnp.cumsum(prefix_mask, axis=1) - 1
         _, kv_cache = self.PaliGemma.llm([prefix_tokens, None], mask=prefix_attn_mask, positions=positions)
 
-        def step(carry):
-            x_t, time = carry
+        def velocity(x_t, time):
             suffix_tokens, suffix_mask, suffix_ar_mask, adarms_cond = self.embed_suffix(
                 observation, x_t, jnp.broadcast_to(time, batch_size)
             )
@@ -266,8 +290,28 @@ class Pi0(_model.BaseModel):
                 adarms_cond=[None, adarms_cond],
             )
             assert prefix_out is None
-            v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
+            return self.action_out_proj(suffix_out[:, -self.action_horizon :])
 
+        def step(carry):
+            x_t, time = carry
+
+            if not use_rtc:
+                return x_t + dt * velocity(x_t, time), time + dt
+
+            weights = prefix_weights[None, :, None]
+            if rtc_correction == "vjp":
+                def denoise(x):
+                    v = velocity(x, time)
+                    # `x - time * v` is the running estimate of the clean chunk.
+                    return x - time * v, v
+
+                x_1, vjp_fn, v_t = jax.vjp(denoise, x_t, has_aux=True)
+                correction = vjp_fn((prev_chunk - x_1) * weights)[0]
+            else:
+                v_t = velocity(x_t, time)
+                correction = (prev_chunk - (x_t - time * v_t)) * weights
+
+            v_t = v_t - _rtc.guidance_weight(time, max_guidance_weight) * correction
             return x_t + dt * v_t, time + dt
 
         def cond(carry):

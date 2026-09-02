@@ -61,11 +61,34 @@ class Policy(BasePolicy):
             self._sample_actions = model.sample_actions
         else:
             # JAX model setup
-            self._sample_actions = nnx_utils.module_jit(model.sample_actions)
+            # `rtc_correction` picks between two different differentiation paths, so it
+            # has to be a compile-time constant rather than a traced value.
+            self._sample_actions = nnx_utils.module_jit(
+                model.sample_actions, static_argnames=("rtc_correction",)
+            )
             self._rng = rng or jax.random.key(0)
 
     @override
-    def infer(self, obs: dict, *, noise: np.ndarray | None = None) -> dict:  # type: ignore[misc]
+    def infer(  # type: ignore[misc]
+        self,
+        obs: dict,
+        *,
+        noise: np.ndarray | None = None,
+        prev_chunk: np.ndarray | None = None,
+        prefix_weights: np.ndarray | None = None,
+        max_guidance_weight: float = 10.0,
+        rtc_correction: str = "vjp",
+        return_raw_actions: bool = False,
+    ) -> dict:
+        """Run one inference.
+
+        Real-Time Chunking arguments (`prev_chunk`, `prefix_weights`) are passed
+        straight through to `sample_actions`; see `openpi.models.rtc`.  Note that
+        `prev_chunk` lives in *model* action space -- normalized and padded to
+        `action_dim` -- not the environment's action space, so it must come from a
+        previous call made with `return_raw_actions=True` rather than from the
+        post-transform actions.
+        """
         # Make a copy since transformations may modify the inputs in place.
         inputs = jax.tree.map(lambda x: x, obs)
         inputs = self._input_transform(inputs)
@@ -80,6 +103,16 @@ class Policy(BasePolicy):
 
         # Prepare kwargs for sample_actions
         sample_kwargs = dict(self._sample_kwargs)
+        if prev_chunk is not None and prefix_weights is not None:
+            if self._is_pytorch_model:
+                raise NotImplementedError("RTC guidance is only wired up for the JAX sampler")
+            chunk = jnp.asarray(prev_chunk, dtype=jnp.float32)
+            if chunk.ndim == 2:  # (action_horizon, action_dim) -> add batch dimension
+                chunk = chunk[None, ...]
+            sample_kwargs["prev_chunk"] = chunk
+            sample_kwargs["prefix_weights"] = jnp.asarray(prefix_weights, dtype=jnp.float32)
+            sample_kwargs["max_guidance_weight"] = float(max_guidance_weight)
+            sample_kwargs["rtc_correction"] = rtc_correction
         if noise is not None:
             noise = torch.from_numpy(noise).to(self._pytorch_device) if self._is_pytorch_model else jnp.asarray(noise)
 
@@ -99,7 +132,13 @@ class Policy(BasePolicy):
         else:
             outputs = jax.tree.map(lambda x: np.asarray(x[0, ...]), outputs)
 
+        # Snapshot the pre-transform chunk before the output transform can rename
+        # or drop it: RTC has to feed the *model-space* chunk back in next call.
+        raw_actions = np.asarray(outputs["actions"]) if return_raw_actions else None
+
         outputs = self._output_transform(outputs)
+        if raw_actions is not None:
+            outputs["raw_actions"] = raw_actions
         outputs["policy_timing"] = {
             "infer_ms": model_time * 1000,
         }

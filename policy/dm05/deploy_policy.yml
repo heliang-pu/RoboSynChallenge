@@ -1,0 +1,40 @@
+# OpenDM DM0.5 Policy Evaluation Configuration
+# 1. 先启动推理服务:  bash launch/run_dm05_server.sh <checkpoint_dir>
+# 2. 再运行评估:      python scripts/eval_policy.py --config policy/dm05/deploy_policy.yml --task_name <task> --setting <clear|random>
+
+# ------------------------------------------------------------------
+# Basic experiment configuration (Each policy must be retained.)
+# ------------------------------------------------------------------
+policy_name: dm05
+task_name: null
+setting: null
+model_name: null
+seed: 0
+max_episodes: 20
+max_steps: 1000 # Maximum environment steps per episode. Effective limit is max(deploy_config.max_steps, gym_config.max_episode_steps).
+headless: false
+pytorch_device: cpu
+filter_dataset_saving: true
+eval_video_log: true
+eval_video_obs_key: cam_high
+
+# ------------------------------------------------------------------
+# DM05-specific parameters, used for get_model()
+# ------------------------------------------------------------------
+server_url: http://127.0.0.1:7891
+dm_step: 30 # Number of actions executed per inference call (<= server chunk_size).
+
+# norm_stats profile & text-conditioning fields.
+# Leave null for your own SFT checkpoint; for the zero-shot base Dexmal/DM05
+# set robot_type to "Aloha" (or "DOS W1") and give control_mode/speed explicitly.
+robot_type: null
+control_mode: null
+speed: null
+
+# Optional list to select/reorder qpos dims so the state matches the
+# checkpoint's norm_stats, e.g. [0,1,2,3,4,5,6,7,8,9,10,11,12,14] to map a
+# 16-dim sim qpos onto a 14-dim Aloha-style state. null = pass qpos as-is.
+state_indices: null
+
+infer_timeout: 60.0
+seed_sampling: null # Optional int for deterministic action sampling.

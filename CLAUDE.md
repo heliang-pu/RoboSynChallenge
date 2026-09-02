@@ -47,6 +47,13 @@ checkpoint `pi05_click_bell_baseline/19999`，三路 224×224 + 14 维 state，�
 多卡机（A100 ×8）上**不要用 `CUDA_VISIBLE_DEVICES`**（Vulkan 不认，会和 CUDA 选到不同物理卡），
 用 `--gpu_id N`；`select_cuda_device` 会把 JAX 也限制到这张卡，否则它在每张卡上预留 75% 显存。
 
+## 已并入的 `feat/parallel-eval`
+
+`scripts/eval_policy.py` 带两种并行：`--num_shards K --shard_index i`（多进程分片，种子序列与串行
+一致，可跨 GPU）和 `--num_envs N`（单进程多环境 wave 批次，需 `--device cuda`，适配器必须能吃
+批量观测）。**pi0.5 适配器（含本分支的 realtime_vla 后端）没有批量化，只能用分片**；
+`env.close()` 已挪到指标落盘之后。完整口径见 `docs/parallel_eval.md`。
+
 ## 环境分层（最容易踩的坑）
 
 **仓库刻意不提供统一环境**，仿真侧和训练侧的 torch/JAX 版本直接冲突，不要试图合并：

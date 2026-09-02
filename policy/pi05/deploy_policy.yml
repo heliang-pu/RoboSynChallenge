@@ -22,10 +22,41 @@ eval_video_obs_key: cam_high
 # ------------------------------------------------------------------
 train_config_name: null
 checkpoint_id: 30000
-pi0_step: 10 # It only represents the number of execution steps. not the horizon of reasoning, it's the horizon of execution.
-inference_backend: jax # Set to realtime_vla to enable the Triton backend.
-checkpoint_root: null # Optional external checkpoint root, e.g. the original worktree's policy/pi05/checkpoints.
+pi0_step: 10 # Official pi0.5 default; item_assembly scored 0/19 with 50-step open-loop execution.
+
+# Optional phase-dependent execution horizons. The model still predicts its
+# full 50-action horizon; "chunk" controls how many actions are executed before
+# replanning. Keep null for the official fixed-pi0_step baseline.
+phase_action_chunks: null
+# item_assembly experiment template (async_mode must be "off"):
+# phase_action_chunks:
+#   - {name: approach_and_grasp, start_step: 0,   end_step: 160, chunk: 10}
+#   - {name: transport,          start_step: 160, end_step: 240, chunk: 5}
+#   - {name: align_and_insert,   start_step: 240,                 chunk: 2}
+
+# ------------------------------------------------------------------
+# Asynchronous execution + Real-Time Chunking (arXiv:2506.07339)
+# ------------------------------------------------------------------
+async_mode: "off"    # off = env frozen during inference (original behaviour)
+                     # sim = env keeps stepping on the old chunk for a fixed
+                     #       inference_delay, computed inline so runs reproduce
+                     # real = inference on a worker thread, wall-clock delay
+inference_delay: 0   # d, in env steps. Ignored when async_mode is off.
+                     # Note H + d must fit in action_horizon (50) or H is clamped.
+rtc: false                     # guide each new chunk to agree with the one it replaces
+prefix_attention_schedule: exp # zeros | ones | linear | exp
+max_guidance_weight: 10.0
+rtc_correction: vjp  # vjp = differentiate through the denoiser (per the paper)
+                     # identity = cheap approximation used by the LeRobot port
+
+# ------------------------------------------------------------------
+# Inference backend: jax (OpenPI, default) or realtime_vla (Triton kernels from
+# dexmal/realtime-vla; see policy/pi05/realtime_vla/README.md). RTC / async
+# modes below require the jax backend.
+# ------------------------------------------------------------------
+inference_backend: jax
+checkpoint_root: null # Optional checkpoint root overriding PI05_CHECKPOINT_ROOT; layout <root>/<train_config>/<model_name>/<step>.
 converted_checkpoint: null # Required by realtime_vla; path to the converted .pkl.
 realtime_vla_dir: null # Defaults to $REALTIME_VLA_DIR, then ../realtime-vla next to the repo.
 tokenizer_path: null # Defaults to ~/.cache/openpi/big_vision/paligemma_tokenizer.model.
-prompt_for_allocation: click the bell
+prompt_for_allocation: click the bell # realtime_vla sizes its prompt buffer from this; use the longest instruction the model will see.

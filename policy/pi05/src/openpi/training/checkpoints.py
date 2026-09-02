@@ -14,6 +14,7 @@ import orbax.checkpoint.future as future
 from openpi.shared import array_typing as at
 import openpi.shared.normalize as _normalize
 import openpi.training.data_loader as _data_loader
+import openpi.training.provenance as _provenance
 import openpi.training.utils as training_utils
 
 
@@ -67,6 +68,8 @@ def save_state(
     state: training_utils.TrainState,
     data_loader: _data_loader.DataLoader,
     step: int,
+    *,
+    config=None,
 ):
     def save_assets(directory: epath.Path):
         # Save the normalization stats.
@@ -74,6 +77,13 @@ def save_state(
         norm_stats = data_config.norm_stats
         if norm_stats is not None and data_config.asset_id is not None:
             _normalize.save(directory / data_config.asset_id, norm_stats)
+        if config is not None:
+            _provenance.write_provenance(
+                directory / "provenance",
+                config,
+                data_config,
+                checkpoint_step=step,
+            )
 
     # Split params that can be used for inference into a separate item.
     with at.disable_typechecking():

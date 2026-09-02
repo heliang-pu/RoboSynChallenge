@@ -1,0 +1,128 @@
+# LiLa-WAM on RoboSynChallenge — head camera only (upstream-faithful).
+#
+# Differences from upstream configs/robotwin_all.yaml:
+#   * state is the 14-dim joint vector (observation.state), not RoboTwin's
+#     16-dim endpose, so common.state_dim is 14;
+#   * a single camera, so the model is structurally identical to upstream
+#     (no camera embedding is created) — use this to reproduce the paper setup
+#     or when GPU memory is tight. Wrist views help a lot on the fine
+#     manipulation tasks, so prefer robosyn_3cam.yaml when you can afford it.
+#
+# Paths are relative to the RoboSynChallenge repo root unless absolute.
+
+common:
+  action_dim: 14              # left_joint1..7 + right_joint1..7 (7 = gripper)
+  state_dim: 14               # observation.state, same layout as action
+
+  action_chunk_size: 32
+  proprio_len: 1
+
+  num_inference_steps: 10
+  action_execution_horizon: 16
+
+
+dataset:
+  type: "lerobot_v21"
+
+  # LeRobot v2.1 dataset roots (each needs meta/ data/ videos/).
+  # v3.0 datasets must be converted first:
+  #   python scripts/convert_lerobot3.0_to_2.1.py --input <v3.0> --output <v2.1>
+  dataset_dir:
+    - "lerobot_dataset/simrecap_sample_loading_round1"
+
+  # RoboSynChallenge task name per root; also the VTT lookup key used at eval
+  # time. Defaults to each root's directory name when omitted.
+  task_names:
+    - "sample_loading"
+
+  # The first camera is the "primary" one: it supplies the future-frame target
+  # and the VTT vectors.
+  camera_names: ["cam_high"]
+
+  state_key: "observation.state"
+  action_key: "action"
+
+  # (W, H). Must be a multiple of the encoder patch size (16 for DINOv3).
+  image_size: [320, 240]
+
+  # Decoded-JPEG frame cache; null -> policy/lila_wam/cache/<task names>
+  cache_dir: null
+  jpeg_quality: 92
+
+  # Precomputed Visual Transition Tokens (precompute_task_cond.py).
+  task_cond_dir: "policy/lila_wam/task_cond"
+
+  image_aug: false
+
+  # Future-frame offset for future-feature prediction; null -> action_chunk_size
+  future_frame_offset: null
+
+  indices_config:
+    state_indices: [0]
+    camera_indices: [0]
+    action_indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+
+
+model:
+  num_registers: 2
+
+  use_task_cond: true
+
+  vision_encoder:
+    checkpoint_path: "policy/lila_wam/dinov3/dinov3-vitl16-pretrain-lvd1689m"
+    feat_layers: [-12, -8, -4]
+    include_cls_register: true
+    fusion_mode: "concat"
+    concat:
+      proj_type: "linear"
+      pre_norm: true
+      out_dim: null
+
+  future_feat:
+    enabled: true
+    target_layer: -4
+    num_decoder_layers: 4
+    num_heads: 4
+
+  action_expert:
+    depth: 12
+    hidden_size: 768
+    num_heads: 8
+    vlm_adapter_num_queries: 64
+    adapter_depth: 4
+
+
+training:
+  batch_size: 128
+
+  time_sampler: "logit_normal"
+  time_mu: 0.0
+  time_sigma: 1.0
+
+  learning_rate: 2e-4
+  lr_min: 5.0e-5
+  weight_decay: 1e-2
+  betas: [0.9, 0.99]
+  grad_clip_norm: 1.0
+
+  # Upstream recommends stopping stage 1 around epoch 11-12, then running a
+  # short stage 2 at lr 4e-5 via --init_from.
+  epochs: 40
+  grad_accum_steps: 1
+  save_interval_epoch: 1
+
+  lambda_future_feat: 0.5
+
+  use_vel_weight: false
+  vel_weight_alpha: 0.2
+  vel_weight_sigma: 0.01
+
+
+inference:
+  smooth_actions: true
+  smooth_sigma: 1.0
+
+
+system:
+  num_workers: 8
+  pin_memory: true
