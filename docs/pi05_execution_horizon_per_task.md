@@ -82,7 +82,36 @@
 - 榜单 20% 是动作效率（见 [leaderboard_scoring_and_action_efficiency.md](leaderboard_scoring_and_action_efficiency.md)），
   两档成功率接近时优先短执行；差距大的任务（drawer / handover / item_assembly）成功率主导，用 50。
 
-## 4. 待办
+## 4. 官方条件复测（2026-09-02/03 夜，28000 权重，realtime-vla 加速后端）
 
-2026-09-02 晚的 10 任务正式评估（28000 权重，全部 `pi0_step=10`）跑完后，对 drawer_open_place、
-items_handover、item_assembly、water_pouring 按 50、manipulate_pipette 按 30 补跑 100 集，正式成绩取本表配置。
+条件：`random`、100 集、`--seed 0`、官方判定、官方 gym_config、CPU 物理、**Hybrid 渲染**（主办方默认），
+`scripts/eval_policy_parallel.py` 分片并行（种子序列与官方单进程一致）。机器：RTX 4090 48 GB（fmc3-1）与 RTX PRO 6000；
+两台机器逐集种子相同，但不是同一张卡，跨机对照要留 ±9 个百分点的抽样噪声余量。
+视频与 `report.md` 归档在 a100-2 `/root/workspace/eval_results/<task>/pi05/realtime_vla/<step>/`（对照 H 在 `alt_h<H>/`）。
+
+| 任务 | H | 成功率 | 平均步数 | AE | Score | 机器 |
+|---|---:|---:|---:|---:|---:|---|
+| click_bell | **10** | 76% | 131 | 63.6 | 69.7 | 4090 |
+| drawer_open_place | **50** | 20% | 799 | 11.2 | 17.2 | 4090 |
+| handle_basket | **10** | 90% | 426 | 14.8 | 70.5 | 4090 |
+| item_assembly | **50** | 45% | 317 | 12.2 | 36.2 | 4090 |
+| items_handover | **50** | 35% | 335 | 4.3 | 27.1 | 4090 |
+| manipulate_pipette | 10 | 71% | 496 | 50.4 | 63.3 | PRO 6000 |
+| manipulate_pipette | **30** | 68% | 497 | 50.3 | 61.1 | PRO 6000 |
+| mixer_operating | **10** | 78% | 371 | 25.8 | 63.7 | 4090 |
+| mixer_operating | 50 | 80% | 312 | 37.6 | 67.5 | PRO 6000 |
+| sample_loading | **10** | 2% | 499 | 0.1 | 1.5 | PRO 6000 |
+| table_rearrangement | **10** | 70% | 225 | 37.8 | 60.1 | 4090 |
+| water_pouring | 10 | 76% | 345 | 31.0 | 63.2 | PRO 6000 |
+| water_pouring | **50** | 52% | 344 | 31.3 | 45.3 | 4090 |
+
+加粗 = 第 1 节定稿值。**定稿配置 10 任务宏平均：SR 53.6%，AE 25.1，IE 0，Overall 45.2**；
+若三个「不确定」项改按本次复测取优（pipette 10、mixer 50、water 10）：SR 56.5%，AE 26.3，Overall 47.6。
+
+对三个待定项的结论：
+- manipulate_pipette：10 与 30 差 3 个点、AE 相同，仍在噪声内，**10/30 任取**；30 保留为定稿值。
+- mixer_operating：50 比 10 高 2 个点成功率、AE 高 12（成功集更早触发判定），**建议改 50**（+3.8 分）。
+- water_pouring：10 比 50 高 24 个点，但两档跑在不同机器上；a100-2 上 FastRT 的 H=50 前 34 集是 85%，
+  说明 4090 这次 52% 可能偏低，**需要同机复跑一次再定**，暂按 10 更稳（+17.9 分，即使打对折也值）。
+- items_handover 35%、drawer 20% 明显低于表 A（71% / 26%）——表 A 是 FastRT 渲染，Hybrid 下画面不同，
+  两个任务对渲染差异敏感，提交前要按主办方渲染器（Hybrid）的数字预期。
