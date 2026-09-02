@@ -118,6 +118,27 @@
 
 跨机复现性很好（同配置两机差 ≤1 个点），所以上表跨机对照可以直接比。
 
+### 渲染器差异：同一权重、同一种子，FastRT（a100-2）vs Hybrid（RTX）
+
+a100-2 上用 FastRT 渲染（`--renderer auto`，A100 无 RT core 时的选择，**非官方条件**）跑的同一批配置，100 集 / seed 0：
+
+| 任务 | H | FastRT 成功率 | Hybrid 成功率 | 差 |
+|---|---:|---:|---:|---:|
+| click_bell | 10 | 77% | 76% | −1 |
+| handle_basket | 10 | 87%（67 集） | 90% | +3 |
+| table_rearrangement | 10 | 74% | 70% | −4 |
+| mixer_operating | 10 / 50 | 82% / 87% | 78% / 80% | −4 / −7 |
+| manipulate_pipette | 10 / 30 | 76%（80 集） / 74% | 71% / 68% | −5 / −6 |
+| water_pouring | 10 / 50 | 73% / 74% | 76% / 52% | +3 / **−22** |
+| item_assembly | 50 | 56% | 45% | −11 |
+| items_handover | 50 | 74% | 35% | **−39** |
+| drawer_open_place | 50 | 28%（86 集） | 20% | −8 |
+| sample_loading | 10 | 4% | 2% | −2 |
+
+FastRT 下定稿配置 Overall 53.0（SR 62.9%），Hybrid 下 45.2（SR 53.6%）。items_handover、water_pouring(H=50)、item_assembly
+对渲染器最敏感——主办方用 Hybrid，**任何用 FastRT 得到的成功率都不能当提交预期**，只能用来比较 H / checkpoint 的相对好坏，
+而且 water_pouring 的 H 结论在两种渲染器下相反（FastRT 50≈10，Hybrid 10 远好于 50），相对结论也要在 Hybrid 下复核。
+
 对三个待定项的结论（复测后）：
 - manipulate_pipette：10 与 30 差 3 个点、AE 相同，仍在噪声内，**10/30 任取**；30 保留为定稿值。
 - mixer_operating：两机都是 50 略高（80% vs 78–79%），且 AE 高 12（成功集更早触发判定），**建议改 50**（+3.3～3.8 分）。
