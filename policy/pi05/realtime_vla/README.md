@@ -61,3 +61,15 @@ the accelerator coexist with the simulator in one process and must stay: the
 CUDA graph is recorded with `capture_error_mode="thread_local"` (the upstream
 default `global` mode makes DexSim's render thread abort the process), and
 `pi_model.py` keeps the upstream `Pi05Inference` untouched by subclassing it.
+
+## Environment
+
+The accelerated path needs nothing beyond the `policy/pi05` uv project environment
+(`pyproject.toml` + `uv.lock`; `cd policy/pi05 && uv sync --frozen`): torch/triton
+(Triton ships with the torch wheel), sentencepiece and transformers are already
+in it, and the simulator (EmbodiChain + dexsim-engine) is pulled in through the
+same project. The evaluation runs on a100-2 used exactly that environment;
+[`requirements-eval-frozen.txt`](requirements-eval-frozen.txt) is a `pip freeze`
+of it with the machine/driver details in the header, for bit-exact rebuilds.
+`dexmal/realtime-vla` itself is a plain-Python clone pinned to `b86a942`, kept
+next to the repository and located via `REALTIME_VLA_DIR` (or `../realtime-vla`).
