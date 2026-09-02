@@ -1,0 +1,13 @@
+{
+  "_comment": "pi0_step (actions executed per inference) per task for the single_task 28000 checkpoints; see docs/pi05_execution_horizon_per_task.md. Decided 2026-09-02.",
+  "click_bell": 10,
+  "handle_basket": 10,
+  "table_rearrangement": 10,
+  "mixer_operating": 10,
+  "sample_loading": 10,
+  "manipulate_pipette": 30,
+  "drawer_open_place": 50,
+  "water_pouring": 50,
+  "items_handover": 50,
+  "item_assembly": 50
+}
