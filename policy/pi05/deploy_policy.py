@@ -33,6 +33,13 @@ def _any_true(value):
     return bool(value)
 
 
+def _to_numpy(value):
+    """Host numpy view of an observation field, whether it is a CPU/CUDA tensor or an array."""
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu().numpy()
+    return np.asarray(value)
+
+
 def _format_env_action(action, env):
     """Convert pi0 output into the torch action format EmbodiChain accepts."""
     action_array = np.asarray(action, dtype=np.float32).reshape(-1)
@@ -66,12 +73,14 @@ def encode_obs(obs):
     img_left_raw = obs["sensor"]["cam_left_wrist"]["color"]
     img_right_raw = obs["sensor"]["cam_right_wrist"]["color"]
 
-    img_front = img_front_raw[0, ..., :3]
-    img_left = img_left_raw[0, ..., :3]
-    img_right = img_right_raw[0, ..., :3]
+    # With GPU physics (--device cuda) the observation tensors live on the sim
+    # device; the openpi / realtime-vla preprocessing wants host numpy arrays.
+    img_front = _to_numpy(img_front_raw[0, ..., :3])
+    img_left = _to_numpy(img_left_raw[0, ..., :3])
+    img_right = _to_numpy(img_right_raw[0, ..., :3])
 
     # Joint state — (num_envs, num_joints) -> squeeze env dim
-    state = obs["robot"]["qpos"][0]
+    state = _to_numpy(obs["robot"]["qpos"][0])
     img_arr = [img_front, img_right, img_left]
 
     return img_arr, state
