@@ -13,7 +13,7 @@
 
 > **分支导航** — 本仓库按主题分支开发，每个分支的说明就在各自 README 的这个位置。
 >
-> **`main`（当前）** 测评 · [`official/main`](../../tree/official/main) 官方同步 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练
+> **`main`（当前）** 测评汇总 · [`official/main`](../../tree/official/main) 官方同步 · [`feat/parallel-eval`](../../tree/feat/parallel-eval) 并行评估 · [`feat/parallel-collect`](../../tree/feat/parallel-collect) 并行采集 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练 · [`fix/random-spawn-reachability`](../../tree/fix/random-spawn-reachability) 生成范围可达性
 
 ## 本分支：`main` — 测评分支
 
@@ -24,11 +24,17 @@
 
 分支分三类：
 
-| 分支 | 角色 |
-|---|---|
-| `main` | **测评分支**，实验分支合流后在这里跑评测 |
-| `official/main` | **官方同步分支**，跟踪主办方 `EDEM-AI/RoboSynChallenge`，只负责把上游拉进来，不在上面开发 |
-| `sim-recap` / `feat/rtc-async-pi05` / `feat/realtime-vla-pi05` / `ppo-post-training` | 实验分支，各管一摊 |
+| 分支 | 角色 | 在做什么 |
+|---|---|---|
+| **`main`** | **测评分支（当前）** | 跑评测的地方，也是各条实验线的汇合点。policy 目录最全，`tests/` 与仓库根 `.venv` 只在这里 |
+| `official/main` | **官方同步** | 跟踪主办方 `EDEM-AI/RoboSynChallenge`，只把上游拉进来，不在上面开发 |
+| `feat/parallel-eval` | 实验 · 评估提速 | 单进程多环境并行评估（`--num_envs N` wave 批次）。种子口径与官方判定逐条不变，适配器零改动；4090 实测 N=4 约 1.7× |
+| `feat/parallel-collect` | 实验 · 采集提速 | 并行专家数据采集：批量环境执行/录制 + 单环境规划 worker 子进程，10 个任务的 action bank 零改动。从 `feat/parallel-eval` 切出 |
+| `sim-recap` | 实验 · 数据闭环 | sim-RECAP：rollout 打标 → 价值函数训练 → advantage 写回 → 发布 v2.1 数据集 → ACP 微调 pi0.5 |
+| `feat/rtc-async-pi05` | 实验 · 推理策略 | pi0.5 的实时分块（RTC）与异步执行：推理与仿真重叠，减少开环空档 |
+| `feat/realtime-vla-pi05` | 实验 · 推理加速 | pi0.5 推理链路加速与评估侧适配（含 ACT worker 路径、训练脚本修正） |
+| `ppo-post-training` | 实验 · 强化学习 | 在 EmbodiChain 上接 RLinf 做 PPO 后训练 |
+| `fix/random-spawn-reachability` | 修复 · 场景配置 | 收窄 10 个任务 random 配置里机械臂够不着的物体生成范围（改了 8 处 `position_range`） |
 
 功能开发在实验分支上做，各自开了 worktree（`git worktree list` 是权威清单），
 **每个 worktree 有各自的 `CLAUDE.md`**，按该分支实际有的东西写，不要跨目录照搬。
@@ -58,39 +64,6 @@
 
 > 说明见 `policy/pi05_lerobot/README.md` 与 `docs/tutorials/policy/pi05_lerobot.md`。
 
-
----
-
-<!-- branch-readme:end -->
-
-# Contents
-
-> **分支导航** — 本仓库按主题分支开发，每个分支的说明就在各自 README 的这个位置。
->
-> [`main`](../../tree/main) 测评 · [`official/main`](../../tree/official/main) 官方同步 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练 · **`feat/parallel-eval`（当前）** 并行评估
-
-## 本分支：`feat/parallel-eval` — 单进程多环境并行评估
-
-给 `scripts/eval_policy.py` 加 **wave 批次并行评估**（`--num_envs N`），利用
-EmbodiChain/DexSim 的多 arena 批量仿真（PhysX GPU 物理 + camera group 批量渲染），
-一个进程一张卡同时推进 N 个 episode。与既有的 `num_shards` 多进程分片正交，可叠加。
-
-```bash
-python scripts/eval_policy.py --config policy/act/deploy_policy.yml \
-    --overrides --task_name click_bell --setting random \
-    --max_episodes 100 --num_envs 8 --device cuda --headless True
-```
-
-- **种子口径不变**：rng 按 episode 序号同序抽种子，每个槽位
-  `reset(seed=seed_k, reset_ids=[slot])` 单独播种，初始场景与单环境同种子逐位一致（实测）
-- **官方判定逐条对应**：`ParallelEvalProxy` 每步锁存 per-env `is_task_success`，
-  截断步不计成功；聚合布尔喂给适配器，**策略适配器零改动**
-- **`num_envs=1`（默认）走原串行循环**，行为与 main 一致
-- 顺手修复：`env.close()` 会终止进程，原先放 `finally` 导致 summary 与
-  `evaluation_metrics.json` 从未落盘；已挪到指标写盘之后
-- 支持状态：`act` 进程内路径 ✅；worker 类与 `pi05`（openpi/JAX）待批量化
-
-设计、语义、已知偏差与策略支持表：**[docs/parallel_eval.md](docs/parallel_eval.md)**。
 
 ---
 
