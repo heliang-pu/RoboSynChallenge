@@ -1,6 +1,6 @@
 # pi0.5 各任务的执行长度（`pi0_step`）决定表
 
-> 2026-09-02 定稿。`pi0_step` = 每次推理后实际执行的动作步数（模型每次预测 50 步），是部署适配器
+> 2026-09-02 定稿，**2026-09-03 按官方条件（Hybrid）复测结果改为逐任务取优**（第 4 节）。`pi0_step` = 每次推理后实际执行的动作步数（模型每次预测 50 步），是部署适配器
 > `policy/pi05/deploy_policy.yml` / `--pi0_step` 的参数，主办方协议允许队伍自定；**不改任何官方文件**。
 > 依据是下面两次扫描（表 A、表 B），最终取值由 heliang-pu 拍板。
 
@@ -16,15 +16,14 @@
 | handle_basket | **10** | 确定 | 表 A 96% vs 92%；表 B 95% vs 45%，一致 |
 | table_rearrangement | **10** | 确定 | 表 A 78% vs 66%；表 B 95% vs 55%，一致 |
 | drawer_open_place | **50** | 确定 | 表 A 26% vs 0%；表 B 30% vs 0%，一致；10 步两批都是 0 |
-| items_handover | **50** | 中等（随权重批次翻转） | 28000 这批表 A 71% vs 48%（100 集，差距远超噪声）→ 对这批可信；但 ft67500 批次表 B 相反（50% vs 30%）。**换权重必须重验** |
-| item_assembly | **50** | 中等 | 只有表 A 有信号：28% vs 17%（100 集，差 11 个点，约 1.9σ）；表 B 两档都 0 |
-| manipulate_pipette | **30** | 不确定（10 与 30 之间） | 表 A 三档 66/72/68 只差 6 个点，在噪声内；表 B 里 50 崩到 25%——**唯一确定的是避开 50** |
-| water_pouring | **50** | 不确定（10 与 50 之间） | 表 A 76/79/80、表 B 90 vs 95，两批差距都在噪声内，10 或 50 都可以 |
-| mixer_operating | **10** | 不确定（拍板） | 表 A 三档全 100% 无区分；按动作效率取短执行。表 B（ft67500 批）倾向 50（85% vs 75%，20 集） |
+| items_handover | **30** | 确定（28000 批） | Hybrid 复测 H=30 61%（seed 0）/ 68%（seed 1）vs H=50 35%、H=10 18%；ft67500 批次倾向 10，换权重必须重验 |
+| item_assembly | **30** | 确定 | Hybrid 复测 H=30 两组不重叠种子都是 59%，H=50 45% |
+| manipulate_pipette | **10** | 中等（10 与 30 在噪声内） | Hybrid 复测 71% vs 68%，AE 相同，取分高的 10；50 两批都崩，排除 |
+| water_pouring | **10** | 确定 | Hybrid 复测 10/30/50 = 76/61/52%，H=50 在 4090 与 pro6000 上都是 52% |
+| mixer_operating | **50** | 中等（成功率无差别） | Hybrid 复测 78–80% 三档持平，50 的成功集更早触发判定，AE 高 12 |
 | sample_loading | **10** | 不确定（无意义） | 两批三档都 ≈0，取值不影响成绩 |
 
-**要靠复跑才能定的**：manipulate_pipette（10 vs 30）、water_pouring（10 vs 50）、mixer_operating（10 vs 50）
-——在提交用的 checkpoint 上各跑 100 集对比，按 `0.75×SR + 0.2×AE` 取；items_handover 换权重批次时同样处理。
+以上取值 = 第 4 节官方条件复测里每个任务得分最高的档（2026-09-03）。原 09-02 定稿（pipette 30、mixer 10、water 50、handover 50、item_assembly 50）宏平均 45.2，现配置 50.8。items_handover 换权重批次时要重验。
 
 机器可读版本：[`policy/pi05/task_pi0_step.json`](../policy/pi05/task_pi0_step.json)。
 
