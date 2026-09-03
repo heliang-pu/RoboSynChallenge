@@ -13,84 +13,19 @@
 
 > **分支导航** — 本仓库按主题分支开发，每个分支的说明就在各自 README 的这个位置。
 >
-> **`main`（当前）** 测评 · [`official/main`](../../tree/official/main) 官方同步 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练
+> [`main`](../../tree/main) 测评汇总 · [`official/main`](../../tree/official/main) 官方同步 · [`feat/parallel-eval`](../../tree/feat/parallel-eval) 并行评估 · [`feat/parallel-collect`](../../tree/feat/parallel-collect) 并行采集 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · **`feat/realtime-vla-pi05`（当前）** 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练 · [`fix/random-spawn-reachability`](../../tree/fix/random-spawn-reachability) 生成范围可达性
 
-## 本分支：`main` — 测评分支
+## 本分支：`feat/realtime-vla-pi05` — pi0.5 推理加速与评估侧适配
 
-**跑评测的地方**，也是各条实验线的汇合点：实验分支做完合回这里，在统一口径下横向比较。
-因此它的 policy 目录最全，`tests/` 与仓库根 `.venv` 也只在这条分支上。
-共用的东西同样放这里：完整的中文项目说明、按需安装的 uv 训练环境、10 个任务的采集/训练/评估流程，
-以及**回退到官方口径的成功判定**（本地改过的判定已全部撤回，避免与排行榜对不上）。
+围绕 pi0.5（openpi/JAX）的**推理链路提速**，以及把评估机上实跑出来的适配修正收进代码：
 
-分支分三类：
+- **推理加速**：pi0.5 推理链路的实时化改造，减少每次 chunk 的墙钟开销
+- **观测转换**：保留评估机在跑的 host-numpy 观测转换路径（GPU 物理下的安全写法）
+- **ACT worker 路径**：lerobot 0.3.3 的 worker 形态，供本机 venv 版本不匹配时评估 ACT
+- **训练脚本与适配器修正**：pi0.5 train 脚本、deploy 适配器在评估中暴露的问题一并修掉
 
-| 分支 | 角色 |
-|---|---|
-| `main` | **测评分支**，实验分支合流后在这里跑评测 |
-| `official/main` | **官方同步分支**，跟踪主办方 `EDEM-AI/RoboSynChallenge`，只负责把上游拉进来，不在上面开发 |
-| `sim-recap` / `feat/rtc-async-pi05` / `feat/realtime-vla-pi05` / `ppo-post-training` | 实验分支，各管一摊 |
-
-功能开发在实验分支上做，各自开了 worktree（`git worktree list` 是权威清单），
-**每个 worktree 有各自的 `CLAUDE.md`**，按该分支实际有的东西写，不要跨目录照搬。
-
-`feat/lila-wam` 与 `feat/lerobot-pi05-mem` 已于 2026-09-01 合入本分支并删除，内容如下。
-
-### LiLa-WAM 接入与随机化覆盖度采集
-
-- **LiLa-WAM 策略**：上游以 submodule 引入，附 deploy 入口、训练脚本、帧缓存、norm stats 与任务条件预计算（`policy/lila_wam/`，说明见 `docs/tutorials/policy/lila_wam.md`）
-- **随机化覆盖度**：`scripts/analyze_random_coverage.py` 统计官方 random 配置的实际覆盖，`scripts/build_coverage_configs.py` 据此生成 93 组收窄范围的采集配置（分层补匀 + 缺口补采），产物在 `configs/<task>/coverage_*/`
-- **约束随机化**：`randomize_rigid_object_pair_pose_constrained` 按 mesh 半尺寸保证成对物体的最小 xy 间隙；配套 6 个**直接调用生产判定函数**而非另写一份实现的测试
-- **数据流水线**：种子化采集、v3.0→v2.1 转换、多视角质检、官方与自采数据合并（`scripts/`、`launch/`）
-- **DM0.5 海光 DCU**：批大小探测、微调入口、checkpoint 回传与看门狗（`policy/dm05/`）
-
-> 覆盖度配置的生成输入 `report/coverage/` 属本地产物不入库，因此生成的配置一并提交，否则 clone 后无法复现。
-
-### LeRobot pi0.5（PyTorch）与 MEM 观测记忆
-
-把 HuggingFace LeRobot 的 pi0.5 PyTorch 实现接成第二套 pi0.5 集成（`policy/pi05_lerobot/`），
-与既有的 openpi/JAX 版 `policy/pi05` 并存，可在同一任务同一 setting 下直接对比。
-
-- **跟最新上游**：锁定含 MEM 的 upstream commit（huggingface/lerobot#4076，短时程视觉与本体观测记忆），`setup_lerobot.sh` 会拒绝没有 `policies/pi05/memory.py` 的版本
-- **MEM 决定执行节奏**：MEM 的历史环形缓冲每次策略调用只入队一帧，只有「每个环境步喂一次」才与训练一致。因此 eval 有 `per_step` / `chunk` 两种模式，带 MEM 的 checkpoint 默认走 `per_step`（实测 12 个环境步：`per_step` 喂满 12 帧，`chunk` 只喂 3 帧）
-- **stride 跟数据集帧率**：`memory_stride` 以数据集帧计，本仓库数据 25fps 而上游默认 30，`finetune.sh` 直接从 `meta/info.json` 读 fps
-- **独立 uv 环境 + worker 进程**：LeRobot 要求 Python ≥3.12 与 transformers v5，仿真侧钉死 3.11，装不进同一解释器；策略跑在自己的 uv 环境里，经 stdio JSON 与 `eval_policy.py` 通信
-- **老 checkpoint 迁移**：过期 config 字段与写死的 tokenizer 路径这两类坑有现成解法，见策略 README
-
-> 说明见 `policy/pi05_lerobot/README.md` 与 `docs/tutorials/policy/pi05_lerobot.md`。
-
-
----
-
-<!-- branch-readme:end -->
-
-# Contents
-
-> **分支导航** — 本仓库按主题分支开发，每个分支的说明就在各自 README 的这个位置。
->
-> [`main`](../../tree/main) 测评 · [`official/main`](../../tree/official/main) 官方同步 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练 · **`feat/parallel-eval`（当前）** 并行评估
-
-## 本分支：`feat/parallel-eval` — 单进程多环境并行评估
-
-给 `scripts/eval_policy.py` 加 **wave 批次并行评估**（`--num_envs N`），利用
-EmbodiChain/DexSim 的多 arena 批量仿真（PhysX GPU 物理 + camera group 批量渲染），
-一个进程一张卡同时推进 N 个 episode。与既有的 `num_shards` 多进程分片正交，可叠加。
-
-```bash
-python scripts/eval_policy.py --config policy/act/deploy_policy.yml \
-    --overrides --task_name click_bell --setting random \
-    --max_episodes 100 --num_envs 8 --device cuda --headless True
-```
-
-- **种子口径不变**：rng 按 episode 序号同序抽种子，每个槽位
-  `reset(seed=seed_k, reset_ids=[slot])` 单独播种，初始场景与单环境同种子逐位一致（实测）
-- **官方判定逐条对应**：`ParallelEvalProxy` 每步锁存 per-env `is_task_success`，
-  截断步不计成功；聚合布尔喂给适配器，**策略适配器零改动**
-- **`num_envs=1`（默认）走原串行循环**，行为与 main 一致
-- 顺手修复：`env.close()` 会终止进程，原先放 `finally` 导致 summary 与
-  `evaluation_metrics.json` 从未落盘；已挪到指标写盘之后
-- 支持状态：`act` 进程内路径 ✅；worker 类与 `pi05`（openpi/JAX）待批量化
-
-设计、语义、已知偏差与策略支持表：**[docs/parallel_eval.md](docs/parallel_eval.md)**。
+执行长度（H）与 checkpoint 的选择结论见 `docs/`：同一权重换 H 成功率可差数十个百分点，
+逐任务定 H、逐存档评估，不要统一取末尾存档。
 
 ---
 
