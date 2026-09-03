@@ -18,12 +18,21 @@
 
 ## 结果
 
-| 任务 | 本次（A100 fast-rt） | 平均步数 | 官方 SmolVLA（RTX，2026-08-21） |
-|---|---|---|---|
-| drawer_open_place | **15%**（15/100） | 822.7/900 | 62% |
-| item_assembly | **39%**（39/100） | 323.6/361 | 24% |
-| sample_loading | **2%**（2/100） | 498.4/500 | 25% |
-| 合计 | 18.7%（56/300） | | |
+| 任务 | 权重（官方发布 ckpt，均 50k steps） | step=10（A100 fast-rt） | 平均步数 | step=50（同链路） | 官方 SmolVLA（RTX，2026-08-21） |
+|---|---|---|---|---|---|
+| drawer_open_place | `SmolVLA_sim_drawer_open_place` @c0088d84 | **15%**（15/100） | 822.7/900 | 19%（19/100） | 62% |
+| item_assembly | `SmolVLA_sim_item_assembly` @db320201 | **39%**（39/100） | 323.6/361 | 0%（0/100） | 24% |
+| sample_loading | `SmolVLA_sim_sample_loading` @2a4f41ab | **2%**（2/100） | 498.4/500 | 0%（0/100） | 25% |
+| 合计 | | 18.7%（56/300） | | 6.3%（19/300） | |
+
+权重说明：三份都是主办方 HF 仓库 `RoboSynChallenge/SmolVLA_sim_<task>` 的发布存档（revision 记在各
+checkpoint 目录的 `OFFICIAL_REVISION`），`train_config.json` 均为 **steps=50000**，chunk_size/n_action_steps=50、
+flow num_steps=10。不是我们自训的权重，没有其它 step 数的存档可选。`step=10/50` 指评估时每次请求
+弹出的动作数（`--smolvla_steps`），不是训练步数；step=50 结果目录 `a100-2:/data/workspace/scratch/smolvla_eval_step50`。
+
+**注意：本表全部用的是旧引擎（79caf6e6 + parallel-fixes）**，与官方 pin 的 v0.2.4 不可比——引擎版本
+才是差距根因，见 `smolvla_official_gap_investigation.md`（v0.2.4 上 drawer 已复测到 36.5%/39.4%）。
+item_assembly 还叠加了官方 PR #44 的吸附机制语义变化，旧引擎数字作废。
 
 官方数字来源：robosyn-bench.net 的 `released-checkpoint-evals.js`（random × 100 集，
 协议版本 `bd6bf77`，评测硬件 RTX 5090 × 4 分片）。

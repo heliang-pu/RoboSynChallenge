@@ -7,14 +7,14 @@
 
 ## 实验矩阵（同 checkpoint、同种子、`--setting random`、`smolvla_steps=10`）
 
-| 环境 | 引擎 | 渲染器 | worker | 结果 |
-|---|---|---|---|---|
-| a100-2（8-31 报告） | 旧 EmbodiChain（79caf6e6 + parallel-fixes） | fast-rt | lerobot 0.6.2 / tf 5.16.1 | 18/104 = 17.3% |
-| 本机 4090 | 旧 EmbodiChain | **hybrid** | 同上 | 20/104 = 19.2% |
-| 本机 4090 | **origin/main 引擎（69deef71）** | hybrid | 同上 | **42/104 = 40.4%** |
-| 本机 4090 | **官方 pin v0.2.4 + 并行修复（parallel-fixes-upstream）** | hybrid | 同上 | **38/104 = 36.5%** |
-| a100-2（GPU0–6 并行，每种子一进程） | **官方 pin v0.2.4 + 并行修复** | **fast-rt** | 同上 | **41/104 = 39.4%** |
-| 主办方 | 最新仓库 | RTX（hybrid） | ？ | 48/104 = 46.2% |
+| 环境 | 权重 | 引擎 | 渲染器 | worker | 结果 |
+|---|---|---|---|---|---|
+| a100-2（8-31 报告） | 官方 drawer ckpt @c0088d84（50k steps） | 旧 EmbodiChain（79caf6e6 + parallel-fixes） | fast-rt | lerobot 0.6.2 / tf 5.16.1 | 18/104 = 17.3% |
+| 本机 4090 | 官方 drawer ckpt @c0088d84（50k steps） | 旧 EmbodiChain | **hybrid** | 同上 | 20/104 = 19.2% |
+| 本机 4090 | 官方 drawer ckpt @c0088d84（50k steps） | **origin/main 引擎（69deef71）** | hybrid | 同上 | **42/104 = 40.4%** |
+| 本机 4090 | 官方 drawer ckpt @c0088d84（50k steps） | **官方 pin v0.2.4 + 并行修复（parallel-fixes-upstream）** | hybrid | 同上 | **38/104 = 36.5%** |
+| a100-2（GPU0–6 并行，每种子一进程） | 官方 drawer ckpt @c0088d84（50k steps） | **官方 pin v0.2.4 + 并行修复** | **fast-rt** | 同上 | **41/104 = 39.4%** |
+| 主办方 | 同一 ckpt（主办方自述） | 最新仓库 | RTX（hybrid） | ？ | 48/104 = 46.2% |
 
 a100-2 v0.2.4 逐种子（我们 / 主办方）：833500 5/6、833600 7/10、833700 4/5、833800 6/5、
 833900 1/4、834000 7/6、834100 8/5、834200 3/7。与 4090 hybrid 的 36.5% 互为独立复现，
@@ -24,6 +24,16 @@ a100-2 v0.2.4 逐种子（我们 / 主办方）：833500 5/6、833600 7/10、833
 逐种子（4090 上游引擎 / 主办方）：833500 6/6、833600 5/10、833700 4/5、833800 5/5、
 833900 3/4、834000 6/6、834100 8/5、834200 5/7。剩余差距在主办方自述的种子不可复现范围内
 （`reset(seed)` 只设 torch seed）。
+
+## 所用权重（全表同一份）
+
+- HF 仓库 `RoboSynChallenge/SmolVLA_sim_drawer_open_place`，revision
+  `c0088d84a568f93fb4401aabafcc41cf643efcdd`（本地目录 `OFFICIAL_REVISION` 文件记录），
+  `model.safetensors` sha256 `7db7937d1e322e8e2416778320151d50714ff4ac9b1929061762b77fefb52e13`。
+- 主办方训练配置（checkpoint 自带 `train_config.json` / `config.json`）：**50 000 steps**、
+  chunk_size 50、n_action_steps 50、flow 采样 num_steps 10、lr warmup 1000 / decay 30000。
+  这是主办方发布的最终存档，不是我们训的；我们没有其他 step 数的存档可比。
+- 评估时 `smolvla_steps=10` 只是每次请求弹出的动作数（见下文「实际是 50 步开环」）。
 
 ## 逐项排除（都是实测，不是推断）
 
