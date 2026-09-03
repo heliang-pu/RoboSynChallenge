@@ -67,7 +67,7 @@ RoboSynChallenge 是基于 [EmbodiChain](https://dexforce.github.io/EmbodiChain/
 - **10 个策略的训练/部署集成**:ACT、Diffusion Policy、pi0、pi0.5(openpi/JAX 与 LeRobot/torch 各一套)、
   DM0.5、G0.5、Motus、XR-1、LiLa-WAM,
   统一评估接口,任何策略实现 `deploy_policy.py` 即可接入;
-- **标准化评估协议**:clear / random / random_3p 三种设置,固定判据与随机种子,结果可复现。
+- **标准化评估协议**:clear / random 两种官方设置,固定判据与随机种子,结果可复现。
 
 # 代码结构
 
@@ -79,7 +79,7 @@ RoboSynChallenge/
 │   ├── Distractor/       #   干扰物资产与随机摆放
 │   └── replay.py         #   轨迹回放
 ├── configs/              # 每任务一个目录:gym_config(场景/相机/随机化)+ action_config(专家动作)
-│   └── <task>/{clear,random,random_3p,aug_*}/
+│   └── <task>/{clear,random,aug_*}/
 ├── launch/               # 数据采集/环境检查/可视化脚本(详见 launch/README.md)
 ├── scripts/              # 采集入口、评估入口、数据集工具(详见 scripts/README.md)
 ├── policy/               # 8 个策略的独立训练/部署环境(互不污染)
@@ -198,7 +198,6 @@ DeepSpeed 等),各自目录下的 `setup_env.sh` 或 README 说明了环境搭�
 |---|---|
 | `clear` | 无域随机化,固定场景 |
 | `random` | 官方域随机化协议(评测口径) |
-| `random_3p` | `random` + 仅录像用的第三视角相机(**不进入模型观测**,用于评估录像) |
 | `aug_base` / `aug_near` / `aug_farright` | 相机视角增广采集配置 |
 
 域随机化效果可用 `bash launch/run_visualize.sh <task>`(单任务)或
@@ -297,7 +296,7 @@ cd policy/dm05 && bash eval.sh <task_name> <setting> ...
 
 `<setting>` 对应 `configs/<task>/<setting>/`:日常验证用 `clear`,
 正式评测用 `random`(官方口径,每 10 步重随机化),
-需要评估录像时用 `random_3p`。
+评估录像用官方三相机(`--eval_video_log True`)。
 
 ## 接入自己的策略
 

@@ -39,7 +39,7 @@ for i in "${!tasks[@]}"; do
         export EMBODICHAIN_SIM_EXIT_PROCESS=0
         export MALLOC_ARENA_MAX=2
         export XLA_PYTHON_CLIENT_MEM_FRACTION=0.55
-        bash eval.sh "$task" random_3p "$config" "$model" 0 \
+        bash eval.sh "$task" random "$config" "$model" 0 \
             --checkpoint_id "$checkpoint" --pi0_step 64 \
             --max_episodes 10 --seed "$seed" --headless true \
             --pytorch_device cuda --eval_video_log true \
