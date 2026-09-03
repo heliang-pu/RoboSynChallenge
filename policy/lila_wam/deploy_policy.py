@@ -73,6 +73,7 @@ def get_model(usr_args: dict):
         state_obs_path=str(usr_args.get("state_obs_path", "robot/qpos")),
         action_execution_horizon=usr_args.get("action_execution_horizon"),
         num_inference_steps=usr_args.get("num_inference_steps"),
+        exposure_match=usr_args.get("exposure_match"),
     )
     model.strict_action_dim = bool(usr_args.get("strict_action_dim", True))
     return model

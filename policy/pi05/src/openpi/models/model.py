@@ -320,7 +320,10 @@ def restore_params(
 
     with ocp.PyTreeCheckpointer() as ckptr:
         metadata = ckptr.metadata(params_path)
-        item = {"params": metadata["params"]}
+        # 训练存档和官方发布的权重顶层都有 "params" 键;用 restore_params(restore_type=np.ndarray)
+        # 取出再另存(如 bf16 导出副本)的树没有这一层,两种布局都接受。
+        _wrapped = "params" in metadata
+        item = {"params": metadata["params"]} if _wrapped else metadata
 
         params = ckptr.restore(
             params_path,
@@ -330,7 +333,8 @@ def restore_params(
                     lambda _: ocp.ArrayRestoreArgs(sharding=sharding, restore_type=restore_type, dtype=dtype), item
                 ),
             ),
-        )["params"]
+        )
+        params = params["params"] if _wrapped else params
 
     # If the params were saved with `save_state` during openpi training, every key path will end with "value", which is
     # added by `nnx.State`. We remove the "value" suffix here and always return what NNX calls a "pure dict".

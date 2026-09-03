@@ -75,8 +75,16 @@ if [[ -z "$UV" ]]; then
     exit 1
 fi
 
-echo "=== [1/5] 建 venv(python $PY_VERSION):$VENV_DIR ==="
-"$UV" venv --python "$PY_VERSION" "$VENV_DIR" || exit 1
+# --allow-existing 是必须的:本脚本的正常用法就是分多次跑(先装训练环境,
+# 之后再补 --with-sim)。uv venv 默认会清空目标目录重建,那会在第二次调用时
+# 把已装好的依赖全删掉——如果此时还有训练进程正用着这个 venv,会把它搞崩。
+if [[ -x "$VENV_DIR/bin/python" ]]; then
+    echo "=== [1/5] 复用已有 venv:$VENV_DIR ==="
+    "$UV" venv --python "$PY_VERSION" --allow-existing "$VENV_DIR" || exit 1
+else
+    echo "=== [1/5] 建 venv(python $PY_VERSION):$VENV_DIR ==="
+    "$UV" venv --python "$PY_VERSION" "$VENV_DIR" || exit 1
+fi
 PY="$VENV_DIR/bin/python"
 
 pip_install() { "$UV" pip install --python "$PY" --index-url "$INDEX" "$@"; }

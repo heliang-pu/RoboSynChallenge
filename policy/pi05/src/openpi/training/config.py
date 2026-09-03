@@ -1000,8 +1000,353 @@ _CONFIGS = [
         ema_decay=None,
     ),
     # =========================================================================
+    # 10 个单任务微调配置 —— 从【官方 pi0.5 base】起训
+    #   数据集: Sim_official_plus_seeded_clean_v21(seeded-clean + official-pruned
+    #           合并,每任务约 2000 集,是官方版的两倍)
+    #   与 *_ft67500 那一轮的区别:那轮从 all10 共训权重起训,实测单任务微调
+    #   反而掉点(click_bell 60%->45%),因为丢掉了多任务共训的正则化。这轮改从
+    #   官方基座起训,规避该问题。
+    #   norm_stats 按各任务自行计算(不复用),action_horizon=50 与现有单任务配方一致。
+    # =========================================================================
+    TrainConfig(
+        name="pi05_click_bell_v21",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="Sim_official_plus_seeded_clean_v21/click_bell",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/base_models/pi05_base_jax/params"),
+        num_train_steps=30000,
+        batch_size=64,
+        fsdp_devices=1,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30000, decay_lr=2.5e-6
+        ),
+        save_interval=3000,
+        keep_period=3000,
+        checkpoint_base_dir="/data/train_out_v21",
+    ),
+    TrainConfig(
+        name="pi05_drawer_open_place_v21",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="Sim_official_plus_seeded_clean_v21/drawer_open_place",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/base_models/pi05_base_jax/params"),
+        num_train_steps=30000,
+        batch_size=64,
+        fsdp_devices=1,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30000, decay_lr=2.5e-6
+        ),
+        save_interval=3000,
+        keep_period=3000,
+        checkpoint_base_dir="/data/train_out_v21",
+    ),
+    TrainConfig(
+        name="pi05_drawer_open_place_v21_bs512",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="Sim_official_plus_seeded_clean_v21/drawer_open_place",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/base_models/pi05_base_jax/params"),
+        num_train_steps=1670,
+        batch_size=512,
+        fsdp_devices=1,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=1670, decay_lr=2.5e-6
+        ),
+        save_interval=167,
+        keep_period=167,
+        checkpoint_base_dir="/data/train_out_bs512",
+    ),
+    TrainConfig(
+        name="pi05_drawer_open_place_v21_bs1024",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="Sim_official_plus_seeded_clean_v21/drawer_open_place",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/base_models/pi05_base_jax/params"),
+        num_train_steps=835,
+        batch_size=1024,
+        fsdp_devices=1,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=835, decay_lr=2.5e-6
+        ),
+        save_interval=83,
+        keep_period=83,
+        checkpoint_base_dir="/data/train_out_bs1024",
+    ),
+    TrainConfig(
+        name="pi05_sample_loading_jaxbase_8gpu",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="Sim_official_plus_seeded_clean_v21/sample_loading",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/root/workspace/base_models/pi05_base_jax/params"),
+        num_train_steps=6613,
+        batch_size=512,
+        ema_decay=None,
+        fsdp_devices=1,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=661, peak_lr=2.5e-5, decay_steps=6613, decay_lr=2.5e-6
+        ),
+        save_interval=661,
+        keep_period=661,
+        checkpoint_base_dir="/root/workspace/models/single_task/sample_loading",
+        num_workers=64,
+    ),
+    TrainConfig(
+        name="pi05_item_assembly_jaxbase_8gpu_ema",
+        # item_assembly v21: 1787 集 / 492,429 帧; 8 卡 × 每卡 32 = 256, 1 epoch ≈ 1924 步; 20000 步 ≈ 10.4 epoch; EMA 0.99
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="Sim_official_plus_seeded_clean_v21/item_assembly",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/root/workspace/base_models/pi05_base_jax/params"),
+        num_train_steps=20000,
+        batch_size=256,
+        ema_decay=0.99,
+        fsdp_devices=1,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1000, peak_lr=2.5e-5, decay_steps=20000, decay_lr=2.5e-6
+        ),
+        save_interval=2000,
+        keep_period=2000,
+        checkpoint_base_dir="/root/workspace/models/single_task/item_assembly",
+        num_workers=64,
+    ),
+    TrainConfig(
+        name="pi05_handle_basket_v21",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="Sim_official_plus_seeded_clean_v21/handle_basket",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/base_models/pi05_base_jax/params"),
+        num_train_steps=30000,
+        batch_size=64,
+        fsdp_devices=1,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30000, decay_lr=2.5e-6
+        ),
+        save_interval=3000,
+        keep_period=3000,
+        checkpoint_base_dir="/data/train_out_v21",
+    ),
+    TrainConfig(
+        name="pi05_item_assembly_v21",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="Sim_official_plus_seeded_clean_v21/item_assembly",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/base_models/pi05_base_jax/params"),
+        num_train_steps=30000,
+        batch_size=64,
+        fsdp_devices=1,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30000, decay_lr=2.5e-6
+        ),
+        save_interval=3000,
+        keep_period=3000,
+        checkpoint_base_dir="/data/train_out_v21",
+    ),
+    TrainConfig(
+        name="pi05_items_handover_v21",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="Sim_official_plus_seeded_clean_v21/items_handover",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/base_models/pi05_base_jax/params"),
+        num_train_steps=30000,
+        batch_size=64,
+        fsdp_devices=1,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30000, decay_lr=2.5e-6
+        ),
+        save_interval=3000,
+        keep_period=3000,
+        checkpoint_base_dir="/data/train_out_v21",
+    ),
+    TrainConfig(
+        name="pi05_manipulate_pipette_v21",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="Sim_official_plus_seeded_clean_v21/manipulate_pipette",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/base_models/pi05_base_jax/params"),
+        num_train_steps=30000,
+        batch_size=64,
+        fsdp_devices=1,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30000, decay_lr=2.5e-6
+        ),
+        save_interval=3000,
+        keep_period=3000,
+        checkpoint_base_dir="/data/train_out_v21",
+    ),
+    TrainConfig(
+        name="pi05_mixer_operating_v21",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="Sim_official_plus_seeded_clean_v21/mixer_operating",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/base_models/pi05_base_jax/params"),
+        num_train_steps=30000,
+        batch_size=64,
+        fsdp_devices=1,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30000, decay_lr=2.5e-6
+        ),
+        save_interval=3000,
+        keep_period=3000,
+        checkpoint_base_dir="/data/train_out_v21",
+    ),
+    TrainConfig(
+        name="pi05_sample_loading_v21",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="Sim_official_plus_seeded_clean_v21/sample_loading",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/base_models/pi05_base_jax/params"),
+        num_train_steps=30000,
+        batch_size=64,
+        fsdp_devices=1,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30000, decay_lr=2.5e-6
+        ),
+        save_interval=3000,
+        keep_period=3000,
+        checkpoint_base_dir="/data/train_out_v21",
+    ),
+    # 16 卡(两机 jax.distributed)版的 sample_loading v21 —— 与上面 8 卡配置同一份数据、
+    # 同一样本预算(30000 步 × bs64 = 1.92M 样本 → 1875 步 × bs1024),只是把 batch 摊到 16 张卡上。
+    # 每卡 batch 仍是 64,和 8 卡配置一致,单卡显存与算力负载不变。
+    # 全局 batch 放大 16×,学习率按 sqrt 放大 4× → 1e-4;warmup 拉到 300 步压住初期。
+    # save_interval 250 —— 好早点拿中间 checkpoint 去评估,不用等训完。
+    TrainConfig(
+        name="pi05_sample_loading_v21_16gpu",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="Sim_official_plus_seeded_clean_v21/sample_loading",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/base_models/pi05_base_jax/params"),
+        num_train_steps=1600,
+        batch_size=1024,
+        # 16 而非 32: 32 个 worker 各自预取 512 样本的 batch(1536 次视频解码),
+        # 会把 112 个核全占满,而 XLA 编译是 CPU 并行的 —— 实测 rank1 因此卡在
+        # backend_compile 超过 35 分钟(py-spy 主线程堆栈确认),rank0 只能干等。
+        num_workers=16,
+        fsdp_devices=1,
+        # EMA 必须关:默认的 0.99 会多存一整份参数(3.3B × 4B ≈ 13 GB),
+        # 每卡 batch 64 时正好撑爆 80G 显存(实测 step 0 就 OOM,要一次分配 31.7 GB)。
+        # 仓库里的 *_ft67500 单任务微调配置同样是 None。
+        ema_decay=None,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=250, peak_lr=1e-4, decay_steps=1600, decay_lr=1e-5
+        ),
+        save_interval=250,
+        keep_period=250,
+        checkpoint_base_dir="/data/train_out_v21_16gpu",
+    ),
+    TrainConfig(
+        name="pi05_table_rearrangement_v21",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="Sim_official_plus_seeded_clean_v21/table_rearrangement",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/base_models/pi05_base_jax/params"),
+        num_train_steps=30000,
+        batch_size=64,
+        fsdp_devices=1,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30000, decay_lr=2.5e-6
+        ),
+        save_interval=3000,
+        keep_period=3000,
+        checkpoint_base_dir="/data/train_out_v21",
+    ),
+    TrainConfig(
+        name="pi05_water_pouring_v21",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="Sim_official_plus_seeded_clean_v21/water_pouring",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/base_models/pi05_base_jax/params"),
+        num_train_steps=30000,
+        batch_size=64,
+        fsdp_devices=1,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30000, decay_lr=2.5e-6
+        ),
+        save_interval=3000,
+        keep_period=3000,
+        checkpoint_base_dir="/data/train_out_v21",
+    ),
+    # =========================================================================
+    # 8 卡 / 16 卡吞吐基准 —— click_bell 单 epoch,从官方 pi0.5 base 起训
+    #   数据集 74000 帧,全局 batch 512 → 144 步 = 1 epoch。8 卡(单机)与
+    #   16 卡(两机 jax.distributed)跑同一配置、同一全局 batch,只有每卡
+    #   batch 不同(64 / 32),因此步数与优化轨迹完全一致,可直接比墙钟时间。
+    #   norm_stats 复用 all10 基座资产 —— 数值不影响吞吐,省掉一次统计量重算。
+    #   save_interval 设得比总步数大,基准跑不写 checkpoint(两机 /data 是各自
+    #   本地盘,不是共享文件系统)。
+    # =========================================================================
+    TrainConfig(
+        name="pi05_click_bell_bench",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            repo_id="RoboSynChallenge/cobotmagic_Sim_click_bell",
+            assets=AssetsConfig(
+                assets_dir="/data/workspace/models/cotrain/pi05_all10_h64_67500/assets",
+                asset_id="RoboSynChallenge/all10_expert_h64",
+            ),
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/base_models/pi05_base_jax/params"),
+        num_train_steps=144,
+        batch_size=512,
+        num_workers=32,
+        fsdp_devices=1,
+        ema_decay=None,
+        lr_schedule=_optimizer.CosineDecaySchedule(warmup_steps=50, peak_lr=1e-5, decay_steps=144, decay_lr=1e-6),
+        save_interval=1_000_000,
+        keep_period=None,
+        wandb_enabled=False,
+        checkpoint_base_dir="/data/bench_out",
+    ),
+    # =========================================================================
     # 10 个单任务微调配置 —— 从 all10 co-train 的 checkpoint 67500 起训
-    #   基座: /data/checkpoints/pi05_all10_h64_67500/params  (H64, 10 任务共训, 成功率 46.5%)
+    #   基座: /data/workspace/models/cotrain/pi05_all10_h64_67500/params  (H64, 10 任务共训, 成功率 46.5%)
     #   归一化: 复用基座的 all10_expert_h64 norm_stats(不按单任务重算,
     #           否则输入分布改变会部分作废预训练权重)
     #   action_horizon 必须为 64,与基座一致
@@ -1012,13 +1357,13 @@ _CONFIGS = [
         data=LeRobotEmbodiChainDataConfig(
             repo_id="RoboSynChallenge/cobotmagic_Sim_click_bell",
             assets=AssetsConfig(
-                assets_dir="/data/checkpoints/pi05_all10_h64_67500/assets",
+                assets_dir="/data/workspace/models/cotrain/pi05_all10_h64_67500/assets",
                 asset_id="RoboSynChallenge/all10_expert_h64",
             ),
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=True,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("/data/checkpoints/pi05_all10_h64_67500/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/models/cotrain/pi05_all10_h64_67500/params"),
         num_train_steps=2960,
         batch_size=50,
         fsdp_devices=1,
@@ -1036,13 +1381,13 @@ _CONFIGS = [
         data=LeRobotEmbodiChainDataConfig(
             repo_id="RoboSynChallenge/cobotmagic_Sim_drawer_open_place",
             assets=AssetsConfig(
-                assets_dir="/data/checkpoints/pi05_all10_h64_67500/assets",
+                assets_dir="/data/workspace/models/cotrain/pi05_all10_h64_67500/assets",
                 asset_id="RoboSynChallenge/all10_expert_h64",
             ),
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=True,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("/data/checkpoints/pi05_all10_h64_67500/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/models/cotrain/pi05_all10_h64_67500/params"),
         num_train_steps=17000,
         batch_size=50,
         fsdp_devices=1,
@@ -1060,13 +1405,13 @@ _CONFIGS = [
         data=LeRobotEmbodiChainDataConfig(
             repo_id="RoboSynChallenge/cobotmagic_Sim_handle_basket",
             assets=AssetsConfig(
-                assets_dir="/data/checkpoints/pi05_all10_h64_67500/assets",
+                assets_dir="/data/workspace/models/cotrain/pi05_all10_h64_67500/assets",
                 asset_id="RoboSynChallenge/all10_expert_h64",
             ),
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=True,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("/data/checkpoints/pi05_all10_h64_67500/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/models/cotrain/pi05_all10_h64_67500/params"),
         num_train_steps=13347,
         batch_size=50,
         fsdp_devices=1,
@@ -1084,13 +1429,13 @@ _CONFIGS = [
         data=LeRobotEmbodiChainDataConfig(
             repo_id="RoboSynChallenge/cobotmagic_Sim_item_assembly",
             assets=AssetsConfig(
-                assets_dir="/data/checkpoints/pi05_all10_h64_67500/assets",
+                assets_dir="/data/workspace/models/cotrain/pi05_all10_h64_67500/assets",
                 asset_id="RoboSynChallenge/all10_expert_h64",
             ),
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=True,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("/data/checkpoints/pi05_all10_h64_67500/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/models/cotrain/pi05_all10_h64_67500/params"),
         num_train_steps=8563,
         batch_size=50,
         fsdp_devices=1,
@@ -1108,13 +1453,13 @@ _CONFIGS = [
         data=LeRobotEmbodiChainDataConfig(
             repo_id="RoboSynChallenge/cobotmagic_Sim_items_handover",
             assets=AssetsConfig(
-                assets_dir="/data/checkpoints/pi05_all10_h64_67500/assets",
+                assets_dir="/data/workspace/models/cotrain/pi05_all10_h64_67500/assets",
                 asset_id="RoboSynChallenge/all10_expert_h64",
             ),
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=True,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("/data/checkpoints/pi05_all10_h64_67500/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/models/cotrain/pi05_all10_h64_67500/params"),
         num_train_steps=13080,
         batch_size=50,
         fsdp_devices=1,
@@ -1132,13 +1477,13 @@ _CONFIGS = [
         data=LeRobotEmbodiChainDataConfig(
             repo_id="RoboSynChallenge/cobotmagic_Sim_manipulate_pipette",
             assets=AssetsConfig(
-                assets_dir="/data/checkpoints/pi05_all10_h64_67500/assets",
+                assets_dir="/data/workspace/models/cotrain/pi05_all10_h64_67500/assets",
                 asset_id="RoboSynChallenge/all10_expert_h64",
             ),
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=True,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("/data/checkpoints/pi05_all10_h64_67500/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/models/cotrain/pi05_all10_h64_67500/params"),
         num_train_steps=11440,
         batch_size=50,
         fsdp_devices=1,
@@ -1156,13 +1501,13 @@ _CONFIGS = [
         data=LeRobotEmbodiChainDataConfig(
             repo_id="RoboSynChallenge/cobotmagic_Sim_mixer_operating",
             assets=AssetsConfig(
-                assets_dir="/data/checkpoints/pi05_all10_h64_67500/assets",
+                assets_dir="/data/workspace/models/cotrain/pi05_all10_h64_67500/assets",
                 asset_id="RoboSynChallenge/all10_expert_h64",
             ),
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=True,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("/data/checkpoints/pi05_all10_h64_67500/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/models/cotrain/pi05_all10_h64_67500/params"),
         num_train_steps=12640,
         batch_size=50,
         fsdp_devices=1,
@@ -1180,13 +1525,13 @@ _CONFIGS = [
         data=LeRobotEmbodiChainDataConfig(
             repo_id="RoboSynChallenge/cobotmagic_Sim_sample_loading",
             assets=AssetsConfig(
-                assets_dir="/data/checkpoints/pi05_all10_h64_67500/assets",
+                assets_dir="/data/workspace/models/cotrain/pi05_all10_h64_67500/assets",
                 asset_id="RoboSynChallenge/all10_expert_h64",
             ),
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=True,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("/data/checkpoints/pi05_all10_h64_67500/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/models/cotrain/pi05_all10_h64_67500/params"),
         num_train_steps=11250,
         batch_size=50,
         fsdp_devices=1,
@@ -1204,13 +1549,13 @@ _CONFIGS = [
         data=LeRobotEmbodiChainDataConfig(
             repo_id="RoboSynChallenge/cobotmagic_Sim_table_rearrangement",
             assets=AssetsConfig(
-                assets_dir="/data/checkpoints/pi05_all10_h64_67500/assets",
+                assets_dir="/data/workspace/models/cotrain/pi05_all10_h64_67500/assets",
                 asset_id="RoboSynChallenge/all10_expert_h64",
             ),
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=True,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("/data/checkpoints/pi05_all10_h64_67500/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/models/cotrain/pi05_all10_h64_67500/params"),
         num_train_steps=8000,
         batch_size=50,
         fsdp_devices=1,
@@ -1228,13 +1573,13 @@ _CONFIGS = [
         data=LeRobotEmbodiChainDataConfig(
             repo_id="RoboSynChallenge/cobotmagic_Sim_water_pouring",
             assets=AssetsConfig(
-                assets_dir="/data/checkpoints/pi05_all10_h64_67500/assets",
+                assets_dir="/data/workspace/models/cotrain/pi05_all10_h64_67500/assets",
                 asset_id="RoboSynChallenge/all10_expert_h64",
             ),
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=True,
         ),
-        weight_loader=weight_loaders.CheckpointWeightLoader("/data/checkpoints/pi05_all10_h64_67500/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/workspace/models/cotrain/pi05_all10_h64_67500/params"),
         num_train_steps=8082,
         batch_size=50,
         fsdp_devices=1,

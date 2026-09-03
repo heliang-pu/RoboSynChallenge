@@ -13,9 +13,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WORKSPACE_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 EMBODICHAIN_ROOT="${EMBODICHAIN_ROOT:-$WORKSPACE_ROOT/EmbodiChain}"
-VENV_DIR="$SCRIPT_DIR/.venv"
-if [[ -z "${PYTHON_BIN:-}" && -x "$VENV_DIR/bin/python" ]]; then
-    PYTHON_BIN="$VENV_DIR/bin/python"
+# 评测跑在**仓库根 venv**里,因为 EmbodiChain / dexsim 装在那儿(见 README
+# 的"仿真/采集/评估环境")。policy/lila_wam/.venv 只是训练环境,没有仿真栈。
+# 根 venv 只需额外补两个包:
+#     uv pip install --python .venv/bin/python "transformers>=4.56,<5" omegaconf
+if [[ -z "${PYTHON_BIN:-}" && -x "$REPO_ROOT/.venv/bin/python" ]]; then
+    PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
+elif [[ -z "${PYTHON_BIN:-}" && -x "$SCRIPT_DIR/.venv/bin/python" ]]; then
+    PYTHON_BIN="$SCRIPT_DIR/.venv/bin/python"
 else
     PYTHON_BIN="${PYTHON_BIN:-python}"
 fi
@@ -47,9 +52,12 @@ if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
     exit 1
 fi
 
+# EmbodiChain 放在**最后**:根 venv 里已经装了 embodichain,把源码 checkout 排在
+# 仓库前面会让 import 解析到源码而不是装好的包,与 dexsim 二进制对不上,
+# 在建环境阶段直接段错误(exit 139)。
 export PYTHONPATH="$REPO_ROOT:$REPO_ROOT/policy:$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 if [[ -d "$EMBODICHAIN_ROOT" ]]; then
-    export PYTHONPATH="$EMBODICHAIN_ROOT:$PYTHONPATH"
+    export PYTHONPATH="$PYTHONPATH:$EMBODICHAIN_ROOT"
 fi
 cd "$REPO_ROOT" # move to RoboSynChallenge root
 

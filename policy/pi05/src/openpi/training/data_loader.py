@@ -320,6 +320,17 @@ def create_torch_data_loader(
             local_batch_size = batch_size
     else:
         local_batch_size = batch_size // jax.process_count()
+        if jax.process_count() > 1:
+            # Multi-node JAX: every process builds the same dataset, so without a sampler
+            # they would all draw the same indices and the "global" batch would just be the
+            # local one repeated. Shard by process index so the union is one real epoch.
+            sampler = torch.utils.data.distributed.DistributedSampler(
+                dataset,
+                num_replicas=jax.process_count(),
+                rank=jax.process_index(),
+                shuffle=shuffle,
+                drop_last=True,
+            )
 
     logging.info(f"local_batch_size: {local_batch_size}")
     data_loader = TorchDataLoader(
@@ -409,9 +420,6 @@ class TorchDataLoader:
                 execute in the main process.
             seed: The seed to use for shuffling the data.
         """
-        if jax.process_count() > 1:
-            raise NotImplementedError("Data loading with multiple processes is not supported.")
-
         if len(dataset) < local_batch_size:
             raise ValueError(f"Local batch size ({local_batch_size}) is larger than the dataset size ({len(dataset)}).")
 

@@ -7,6 +7,15 @@
 #   - reset_model(model) -> None
 # ----------------------------------------------------------------------------
 
+import atexit
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
 import numpy as np
 import torch
 
@@ -15,10 +24,148 @@ from lerobot.policies.act.modeling_act import ACTPolicy
 from policy.inference_timing import finish_inference, start_inference
 
 
+def _to_numpy(value) -> np.ndarray:
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu().numpy()
+    return np.asarray(value)
+
+
+class ACTWorkerClient:
+    """Run ACT in its training-time LeRobot environment over line-delimited RPC."""
+
+    def __init__(self, usr_args):
+        self.checkpoint_path = Path(usr_args["checkpoint_path"]).resolve()
+        self.python_bin = (
+            usr_args.get("act_python")
+            or os.environ.get("ACT_PYTHON")
+            or sys.executable
+        )
+        self.device = usr_args.get("device", usr_args.get("pytorch_device", "cuda"))
+        self.act_step = int(usr_args.get("act_step", 8))
+        self.state_obs_path = usr_args.get("state_obs_path", "robot/qpos")
+        self.strict_action_dim = bool(usr_args.get("strict_action_dim", True))
+
+        config = json.loads((self.checkpoint_path / "config.json").read_text())
+        input_features = config.get("input_features", {})
+        self.act_image_keys = [
+            key
+            for key, feature in input_features.items()
+            if feature.get("type") == "VISUAL"
+        ]
+        default_map = {
+            "observation.images.cam_high": "cam_high",
+            "observation.images.cam_right_wrist": "cam_right_wrist",
+            "observation.images.cam_left_wrist": "cam_left_wrist",
+        }
+        default_map.update(usr_args.get("image_key_map") or {})
+        self.image_key_map = default_map
+
+        worker_path = Path(__file__).resolve().parent / "act_worker.py"
+        worker_env = os.environ.copy()
+        worker_cmd = [
+            str(self.python_bin),
+            str(worker_path),
+            "--checkpoint-dir",
+            str(self.checkpoint_path),
+            "--device",
+            str(self.device),
+        ]
+        self.proc = subprocess.Popen(
+            worker_cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=None,
+            text=True,
+            bufsize=1,
+            env=worker_env,
+        )
+        atexit.register(self.close)
+
+    def close(self):
+        if getattr(self, "proc", None) is None or self.proc.poll() is not None:
+            return
+        if self.proc.stdin is not None:
+            try:
+                self.proc.stdin.close()
+            except Exception:
+                pass
+        try:
+            self.proc.terminate()
+            self.proc.wait(timeout=5)
+        except Exception:
+            self.proc.kill()
+            self.proc.wait(timeout=5)
+
+    def _rpc(self, payload):
+        if self.proc.stdin is None or self.proc.stdout is None:
+            raise RuntimeError("ACT worker pipes are unavailable")
+        self.proc.stdin.write(json.dumps(payload) + "\n")
+        self.proc.stdin.flush()
+        while True:
+            line = self.proc.stdout.readline()
+            if not line:
+                raise RuntimeError("ACT worker exited unexpectedly")
+            try:
+                response = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not response.get("ok", False):
+                raise RuntimeError(response.get("error", "ACT worker error"))
+            return response
+
+    @staticmethod
+    def _select_first_env(value):
+        array = _to_numpy(value)
+        if array.ndim >= 2 and array.shape[0] == 1:
+            array = array[0]
+        return np.ascontiguousarray(array)
+
+    def infer(self, obs):
+        state = obs
+        for key in str(self.state_obs_path).split("/"):
+            if key:
+                state = state[key]
+        encoded = {
+            "observation.state": self._select_first_env(state).astype(
+                np.float32, copy=False
+            )
+        }
+        for image_key in self.act_image_keys:
+            camera_name = self.image_key_map.get(
+                image_key, image_key.removeprefix("observation.images.")
+            )
+            encoded[image_key] = self._select_first_env(
+                obs["sensor"][camera_name]["color"]
+            )
+
+        fd, obs_path = tempfile.mkstemp(prefix="act_obs_", suffix=".npz")
+        os.close(fd)
+        try:
+            np.savez(obs_path, **encoded)
+            response = self._rpc(
+                {
+                    "cmd": "infer",
+                    "obs_path": obs_path,
+                    "n_action_steps": self.act_step,
+                }
+            )
+        finally:
+            if os.path.exists(obs_path):
+                os.remove(obs_path)
+        return [np.asarray(action, dtype=np.float32) for action in response["actions"]]
+
+    def reset(self):
+        self._rpc({"cmd": "reset"})
+
+
 def get_model(usr_args):
     checkpoint_path = usr_args.get("checkpoint_path")
     if checkpoint_path is None:
         raise ValueError("checkpoint_path must be provided in usr_args.")
+
+    worker_python = usr_args.get("act_python") or os.environ.get("ACT_PYTHON")
+    if worker_python:
+        return ACTWorkerClient(usr_args)
 
     device = usr_args.get("device", usr_args.get("pytorch_device", "cuda"))
     cli_overrides = [f"--device={device}"]
@@ -64,6 +211,42 @@ def get_model(usr_args):
 
 
 def eval(env, model, obs):
+    if isinstance(model, ACTWorkerClient):
+        started_at = time.perf_counter()
+        actions = model.infer(obs)
+        inference_times_s = [time.perf_counter() - started_at]
+        final_obs = obs
+        info = None
+        truncated = False
+        for action in actions:
+            action_tensor = torch.as_tensor(
+                action,
+                dtype=torch.float32,
+                device=env.unwrapped.device,
+            ).reshape(1, -1)
+            env_action_dim = int(np.prod(env.unwrapped.single_action_space.shape))
+            policy_action_dim = int(action_tensor.shape[-1])
+            if policy_action_dim != env_action_dim:
+                message = (
+                    f"Policy action has dim {policy_action_dim}, "
+                    f"but env expects {env_action_dim}."
+                )
+                if model.strict_action_dim or policy_action_dim < env_action_dim:
+                    raise ValueError(message)
+                action_tensor = action_tensor[:, :env_action_dim]
+            final_obs, reward, terminated, truncated, info = env.step(action_tensor)
+            if env.get_wrapper_attr("is_task_success")():
+                break
+            if isinstance(truncated, torch.Tensor):
+                is_truncated = truncated.any().item()
+            elif isinstance(truncated, np.ndarray):
+                is_truncated = truncated.any()
+            else:
+                is_truncated = bool(truncated)
+            if is_truncated:
+                break
+        return final_obs, info, truncated, inference_times_s
+
     final_obs = obs
     info = None
     truncated = False
@@ -135,3 +318,8 @@ def eval(env, model, obs):
 
 def reset_model(model):
     model.reset()
+
+
+def close_model(model):
+    if isinstance(model, ACTWorkerClient):
+        model.close()

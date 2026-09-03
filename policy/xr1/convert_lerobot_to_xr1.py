@@ -520,9 +520,13 @@ def transcode_video(source, destination, expected_frames=None):
     temporary = destination + ".tmp.mp4"
     command = [
         "ffmpeg", "-y", "-loglevel", "error",
+        "-threads", "2",   # 输入侧：限制解码线程（放在 -i 之前才生效；下面输出侧那份只管 libx264）
         "-i", source,
         "-an",
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-preset", "veryfast",
+        # 不限线程时 libx264 每进程开 1.5×核数的线程,20 路并行就把 112 核机器打到 load 400+;
+        # 并行度由 --video_workers 控制,单进程 2 线程足够
+        "-threads", "2",
         temporary,
     ]
     result = subprocess.run(command, capture_output=True, text=True)

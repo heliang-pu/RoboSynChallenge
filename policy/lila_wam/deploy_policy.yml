@@ -46,3 +46,9 @@ strict_action_dim: true
 # null -> use the values baked into the training config
 action_execution_horizon: null
 num_inference_steps: null
+
+# 诊断开关(默认 null=关闭):把每帧线性缩放到训练集的相机亮度。
+# 用于判断评测场景曝光是否落在训练分布之外。不是正式方案——
+# 饱和像素的信息已经丢了,缩放只恢复统计量。
+# 例: {cam_high: 105.6, cam_left_wrist: 50.5, cam_right_wrist: 46.5}
+exposure_match: null

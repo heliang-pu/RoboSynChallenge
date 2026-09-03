@@ -95,6 +95,7 @@ class LilaWamInference:
         state_obs_path: str = "robot/qpos",
         action_execution_horizon: int | None = None,
         num_inference_steps: int | None = None,
+        exposure_match: dict | None = None,
     ):
         from omegaconf import OmegaConf
 
@@ -167,6 +168,15 @@ class LilaWamInference:
                 )
             self.set_task(task_name)
 
+        # 诊断用的曝光匹配(默认关闭)。评测场景可能比训练数据亮得多——
+        # 本任务实测 cam_high 训练中位数 105.6、环境 227.9,腕部相机 50 vs 207。
+        # 冻结的 DINOv3 从没见过这种输入。这个开关把每帧线性缩放到训练亮度,
+        # 用来判断"分布外曝光"是不是失败主因。它**不是**正式方案:
+        # 已经饱和的像素信息已丢失,缩放只能恢复统计量,恢复不了细节。
+        self.exposure_match = dict(exposure_match) if exposure_match else None
+        if self.exposure_match:
+            logger.info("曝光匹配已启用: %s", self.exposure_match)
+
         self.action_queue: deque[np.ndarray] = deque()
 
     # ------------------------------------------------------------------ setup
@@ -200,6 +210,7 @@ class LilaWamInference:
             rgb = extract_rgb(obs, camera, env_index=env_index)
             if (rgb.shape[1], rgb.shape[0]) != (width, height):
                 rgb = cv2.resize(rgb, (width, height), interpolation=cv2.INTER_AREA)
+            rgb = self._match_exposure(rgb, camera)
             frames.append(normalize_image(rgb))
         pixel_values = torch.from_numpy(np.stack(frames, axis=0)[None]).to(self.device, self.dtype)
 
@@ -212,6 +223,19 @@ class LilaWamInference:
             )
         state_tensor = torch.from_numpy(state).to(self.device, self.dtype).view(1, 1, -1)
         return {"pixel_values": pixel_values, "state": state_tensor}
+
+    def _match_exposure(self, rgb: np.ndarray, camera: str) -> np.ndarray:
+        """把单帧线性缩放到该相机的训练亮度(诊断开关,默认关闭)。"""
+        if not self.exposure_match:
+            return rgb
+        target = self.exposure_match.get(camera)
+        if target is None:
+            return rgb
+        current = float(rgb.mean())
+        if current < 1e-3:
+            return rgb
+        scaled = rgb.astype(np.float32) * (float(target) / current)
+        return np.clip(scaled, 0, 255).astype(np.uint8)
 
     @torch.no_grad()
     def predict_chunk(self, obs, env_index: int = 0) -> np.ndarray:

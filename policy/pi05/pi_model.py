@@ -99,6 +99,14 @@ class PI0:
                 / self.model_name
                 / str(self.checkpoint_id)
             )
+        # 多卡机上按 OPENPI_SINGLE_DEVICE 钉住 JAX 默认设备; 官方 eval_policy.py 不钉,
+        # 否则每个评估进程都会在 GPU0 上预分配显存, 并发时把 GPU0 挤爆。
+        _sd = os.environ.get("OPENPI_SINGLE_DEVICE")
+        if _sd is not None and _sd.strip().isdigit():
+            import jax
+            _devs = jax.devices()
+            if 0 <= int(_sd) < len(_devs):
+                jax.config.update("jax_default_device", _devs[int(_sd)])
         config = _config_for_checkpoint(
             self.train_config_name,
             checkpoint_dir,

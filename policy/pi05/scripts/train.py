@@ -1,7 +1,9 @@
 import dataclasses
 import functools
 import logging
+import os
 import platform
+import time
 from typing import Any
 
 import etils.epath as epath
@@ -27,6 +29,26 @@ import openpi.training.provenance as _provenance
 import openpi.training.sharding as sharding
 import openpi.training.utils as training_utils
 import openpi.training.weight_loaders as _weight_loaders
+
+
+def init_multiprocess():
+    """Opt into multi-node training: one process per node, mesh spans every node's GPUs.
+
+    Off unless OPENPI_NUM_PROCESSES > 1, so single-node runs keep the original code path.
+    Must run before any other JAX call, hence the call site in __main__ ahead of cli().
+
+        OPENPI_NUM_PROCESSES       number of nodes
+        OPENPI_PROCESS_ID          rank of this node, 0..N-1
+        OPENPI_COORDINATOR_ADDRESS host:port of rank 0, reachable from every node
+    """
+    num_processes = int(os.environ.get("OPENPI_NUM_PROCESSES", "1"))
+    if num_processes <= 1:
+        return
+    jax.distributed.initialize(
+        coordinator_address=os.environ["OPENPI_COORDINATOR_ADDRESS"],
+        num_processes=num_processes,
+        process_id=int(os.environ["OPENPI_PROCESS_ID"]),
+    )
 
 
 def init_logging():
@@ -216,7 +238,9 @@ def main(config: _config.TrainConfig):
         overwrite=config.overwrite,
         resume=config.resume,
     )
-    init_wandb(config, resuming=resuming, enabled=config.wandb_enabled)
+    # Only rank 0 owns the wandb run; the other nodes still need a live wandb module so the
+    # unconditional wandb.log calls below stay no-ops.
+    init_wandb(config, resuming=resuming, enabled=config.wandb_enabled and jax.process_index() == 0)
 
     data_loader = _data_loader.create_data_loader(
         config,
@@ -235,12 +259,15 @@ def main(config: _config.TrainConfig):
     batch = next(data_iter)
     logging.info(f"Initialized data loader:\n{training_utils.array_tree_to_info(batch)}")
 
-    # Log images from first batch to sanity check.
-    images_to_log = [
-        wandb.Image(np.concatenate([np.array(img[i]) for img in batch[0].images.values()], axis=1))
-        for i in range(min(5, len(next(iter(batch[0].images.values())))))
-    ]
-    wandb.log({"camera_views": images_to_log}, step=0)
+    # Log images from first batch to sanity check. Skipped across nodes: the batch is a global
+    # array whose leading slices live on other hosts, so np.array(img[i]) would touch
+    # non-addressable shards.
+    if jax.process_count() == 1:
+        images_to_log = [
+            wandb.Image(np.concatenate([np.array(img[i]) for img in batch[0].images.values()], axis=1))
+            for i in range(min(5, len(next(iter(batch[0].images.values())))))
+        ]
+        wandb.log({"camera_views": images_to_log}, step=0)
 
     train_state, train_state_sharding = init_train_state(config, init_rng, mesh, resume=resuming)
     jax.block_until_ready(train_state)
@@ -264,26 +291,57 @@ def main(config: _config.TrainConfig):
         dynamic_ncols=True,
     )
 
+    # OPENPI_BENCH=1 turns the run into a throughput measurement: no checkpoints (the final-step
+    # save below would otherwise always fire), and a timing breakdown that separates the one-off
+    # XLA compile from the steady-state step rate.
+    bench = os.environ.get("OPENPI_BENCH", "0") == "1"
+    loop_t0 = time.time()
+    after_first_step = None
+
     infos = []
     for step in pbar:
         with sharding.set_mesh(mesh):
             train_state, info = ptrain_step(train_rng, train_state, batch)
+        if after_first_step is None:
+            jax.block_until_ready(train_state)
+            after_first_step = time.time()
         infos.append(info)
         if step % config.log_interval == 0:
             stacked_infos = common_utils.stack_forest(infos)
             reduced_info = jax.device_get(jax.tree.map(jnp.mean, stacked_infos))
             info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_info.items())
-            pbar.write(f"Step {step}: {info_str}")
+            # logging, not pbar.write: stdout is block-buffered when redirected to a file, so the
+            # loss line would otherwise only surface when the process exits.
+            logging.info(f"Step {step}: {info_str}")
             wandb.log(reduced_info, step=step)
             infos = []
         batch = next(data_iter)
 
-        if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:
+        if not bench and (
+            (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1
+        ):
+            # Every process takes part: orbax splits the write across them and coordinates with
+            # barriers, so checkpoint_dir must be one directory all nodes can see (NFS across the
+            # two A100 hosts). Skipping it on non-zero ranks leaves those barriers unanswered.
             _checkpoints.save_state(checkpoint_manager, train_state, data_loader, step, config=config)
+            if jax.process_index() == 0:
+                logging.info(f"[ckpt] step {step} saved")
+
+    jax.block_until_ready(train_state)
+    loop_t1 = time.time()
+    n_steps = config.num_train_steps - start_step
+    logging.info(
+        f"[bench] devices={jax.device_count()} processes={jax.process_count()} "
+        f"global_batch={config.batch_size} steps={n_steps} "
+        f"compile_plus_step0={after_first_step - loop_t0:.1f}s "
+        f"loop_total={loop_t1 - loop_t0:.1f}s "
+        f"steady_s_per_step={(loop_t1 - after_first_step) / max(n_steps - 1, 1):.3f}"
+    )
 
     logging.info("Waiting for checkpoint manager to finish")
     checkpoint_manager.wait_until_finished()
 
 
 if __name__ == "__main__":
+    init_multiprocess()
     main(_config.cli())

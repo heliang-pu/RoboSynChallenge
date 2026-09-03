@@ -9,7 +9,7 @@
 #   gpu_ids  : 逗号分隔,如 "0" 或 "0,1"
 #   exp_name : 实验名,默认 ft67500
 #
-# 基座   : /data/checkpoints/pi05_all10_h64_67500/params  (H64)
+# 基座   : /data/workspace/models/cotrain/pi05_all10_h64_67500/params  (H64)
 # 归一化 : 复用基座 all10_expert_h64 norm_stats(不重算)
 # 输出   : /data/train_out/pi05_<task>_ft67500/<exp_name>/
 # =============================================================================
@@ -46,7 +46,7 @@ echo " 输出     : /data/train_out/$CONFIG_NAME/$EXP_NAME/"
 echo "==============================================="
 
 [[ -d "$HF_LEROBOT_HOME/$REPO_ID" ]] || { echo "[错误] 数据集不存在: $HF_LEROBOT_HOME/$REPO_ID"; exit 1; }
-[[ -d /data/checkpoints/pi05_all10_h64_67500/params ]] || { echo "[错误] 基座权重不存在"; exit 1; }
+[[ -d /data/workspace/models/cotrain/pi05_all10_h64_67500/params ]] || { echo "[错误] 基座权重不存在"; exit 1; }
 
 MODE_FLAG="--overwrite"
 for a in ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}; do [[ "$a" == "--resume" ]] && MODE_FLAG=""; done

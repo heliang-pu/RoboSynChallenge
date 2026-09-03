@@ -5,9 +5,19 @@ import argparse
 import copy
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import torch
+
+
+class _EpochAwareDistributedSampler(torch.utils.data.distributed.DistributedSampler):
+    """Advance the distributed shuffle seed every time the dataloader wraps."""
+
+    def __iter__(self):
+        iterator = super().__iter__()
+        self.epoch += 1
+        return iterator
 
 
 LEGACY_FEATURE_ALIASES = {
@@ -128,7 +138,7 @@ def _patch_lerobot_dataset_factory(distributed_context=None):
             if sampler is not None:
                 kwargs["sampler"] = list(sampler)[rank::world_size]
             elif kwargs.get("shuffle"):
-                kwargs["sampler"] = torch.utils.data.distributed.DistributedSampler(
+                kwargs["sampler"] = _EpochAwareDistributedSampler(
                     dataset, world_size, rank
                 )
                 kwargs["shuffle"] = False
@@ -186,21 +196,29 @@ def main():
         import torch.distributed as dist
         local_rank = args.local_rank if args.local_rank is not None else int(os.environ["LOCAL_RANK"])
         torch.cuda.set_device(local_rank)
-        dist.init_process_group(backend="nccl")
+        dist.init_process_group(
+            backend="nccl", device_id=torch.device("cuda", local_rank)
+        )
         distributed_context = (int(os.environ["RANK"]), int(os.environ["WORLD_SIZE"]), local_rank)
     dataset_root = Path(args.dataset_root).expanduser().resolve()
     repo_id = args.repo_id or dataset_root.name
-    output_dir = Path(args.output_dir).expanduser().resolve()
-    if distributed_context is not None:
-        output_dir = output_dir / f"rank_{distributed_context[0]}"
+    output_root = Path(args.output_dir).expanduser().resolve()
 
-    if args.overwrite and output_dir.exists() and not args.resume:
-        shutil.rmtree(output_dir)
+    if args.overwrite and output_root.exists() and not args.resume:
+        if distributed_context is None or distributed_context[0] == 0:
+            shutil.rmtree(output_root)
+    if distributed_context is not None:
+        dist.barrier()
+    output_dir = output_root
+    if distributed_context is not None and distributed_context[0] != 0:
+        output_dir = output_root / ".distributed" / f"rank_{distributed_context[0]}"
 
     from lerobot.configs.default import DatasetConfig
     from lerobot.configs.default import WandBConfig
     from lerobot.configs.train import TrainPipelineConfig
     from lerobot.policies.act.configuration_act import ACTConfig
+    from lerobot.utils.utils import init_logging
+    init_logging()
     lerobot_train = _patch_lerobot_dataset_factory(distributed_context)
 
     policy_kwargs = {
@@ -215,27 +233,54 @@ def main():
         key: value for key, value in policy_kwargs.items() if value is not None
     }
 
-    cfg = TrainPipelineConfig(
-        dataset=DatasetConfig(
-            repo_id=repo_id,
-            root=str(dataset_root),
-            use_imagenet_stats=not args.no_imagenet_stats,
-            video_backend=args.video_backend,
-        ),
-        policy=ACTConfig(**policy_kwargs),
-        output_dir=output_dir,
-        job_name=args.wandb_name or args.job_name,
-        resume=args.resume,
-        seed=args.seed,
-        num_workers=args.num_workers,
-        batch_size=args.batch_size,
-        steps=args.steps,
-        eval_freq=args.eval_freq,
-        log_freq=args.log_freq,
-        save_checkpoint=not args.no_save_checkpoint,
-        save_freq=args.save_freq,
-        wandb=WandBConfig(enable=args.wandb and (distributed_context is None or distributed_context[0] == 0), project=args.wandb_project),
-    )
+    if args.resume:
+        last_checkpoint = (output_root / "checkpoints" / "last").resolve()
+        config_path = last_checkpoint / "pretrained_model" / "train_config.json"
+        if not config_path.is_file():
+            raise FileNotFoundError(
+                f"Cannot resume: checkpoint train config does not exist: {config_path}"
+            )
+
+        # LeRobot 0.3.3 expects the entire saved TrainPipelineConfig on resume.
+        # Merely constructing a fresh config with resume=True loses the saved
+        # optimizer preset and does not identify the policy/checkpoint path.
+        cfg = TrainPipelineConfig.from_pretrained(config_path)
+        cfg.resume = True
+        cfg.output_dir = output_dir
+
+        # TrainPipelineConfig.validate() obtains config_path from the original
+        # command line even when a config object is passed to the decorated
+        # train function. Append it only after our argparse parser has run.
+        sys.argv.append(f"--config_path={config_path}")
+        print(f"[ACT train] Resuming full training state from: {last_checkpoint}")
+    else:
+        cfg = TrainPipelineConfig(
+            dataset=DatasetConfig(
+                repo_id=repo_id,
+                root=str(dataset_root),
+                use_imagenet_stats=not args.no_imagenet_stats,
+                video_backend=args.video_backend,
+            ),
+            policy=ACTConfig(**policy_kwargs),
+            output_dir=output_dir,
+            job_name=args.wandb_name or args.job_name,
+            resume=False,
+            seed=args.seed,
+            num_workers=args.num_workers,
+            batch_size=args.batch_size,
+            steps=args.steps,
+            eval_freq=args.eval_freq,
+            log_freq=args.log_freq,
+            save_checkpoint=(
+                not args.no_save_checkpoint
+                and (distributed_context is None or distributed_context[0] == 0)
+            ),
+            save_freq=args.save_freq,
+            wandb=WandBConfig(enable=args.wandb and (distributed_context is None or distributed_context[0] == 0), project=args.wandb_project),
+        )
+    if distributed_context is not None and distributed_context[0] != 0:
+        cfg.save_checkpoint = False
+        cfg.wandb.enable = False
     lerobot_train(cfg)
     if distributed_context is not None:
         dist.destroy_process_group()

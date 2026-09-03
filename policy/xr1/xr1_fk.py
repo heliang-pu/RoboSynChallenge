@@ -67,6 +67,11 @@ class CobotMagicFK:
             self.chain = pk.build_serial_chain_from_urdf(
                 handle.read(), END_LINK, ROOT_LINK
             )
+        # FK 是成百上千个小张量算子，torch 默认按核数开线程（112 核机器 = 112 线程），
+        # 多进程并行转换时严重超订：实测一集(430 帧×4 次 FK) 默认线程 6.9 s，1 线程 0.02 s，差 350 倍。
+        # 只影响本进程的 CPU intra-op 线程数；GPU 与其他进程不受影响。
+        if device == "cpu":
+            torch.set_num_threads(1)
         self.chain = self.chain.to(dtype=torch.float64, device=device)
 
         self.dof = len(self.chain.get_joint_parameter_names())

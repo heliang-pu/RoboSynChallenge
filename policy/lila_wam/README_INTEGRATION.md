@@ -37,13 +37,23 @@ policy/lila_wam/
 
 ## 1. 环境
 
-```bash
-# 训练环境(policy/lila_wam/.venv,CPython 3.11 + torch 2.7.1 cu128)
-bash policy/lila_wam/setup_env.sh --download-encoder
+**训练**用独立环境:
 
-# 需要在同一个解释器里跑仿真评测时再加:
-bash policy/lila_wam/setup_env.sh --with-sim
+```bash
+bash policy/lila_wam/setup_env.sh --download-encoder
 ```
+
+**评测**直接用**仓库根 venv**——EmbodiChain / dexsim 本来就装在那儿
+(README 的"仿真/采集/评估环境"),只需补两个 LiLa-WAM 要的包:
+
+```bash
+uv pip install --python .venv/bin/python "transformers>=4.56,<5" omegaconf
+```
+
+实测这一步是纯增量的(新增 transformers / tokenizers / omegaconf /
+antlr4-runtime 四个包,零升级零降级),不会动到现有仿真栈。`eval.sh` 默认就用根
+venv。只有在根 venv 不可用的机器上,才需要 `setup_env.sh --with-sim` 把整套仿真栈
+装进 policy 环境——那条路要私有源权限,而且会多占几个 GB。
 
 上游 README 写的是 conda + Python 3.10,这里改成 uv + 3.11:评测要和 EmbodiChain
 跑在同一个解释器里,而仿真栈的 pin 需要 ≥3.11;LiLa-WAM 本身没有 3.10 专属依赖。
