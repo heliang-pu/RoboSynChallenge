@@ -97,8 +97,9 @@ import `launch_testing` 并崩在 `No module named 'lark'`。**2026-09-01 已把
 **任务 → 配置 → 环境**。`robosynchallenge/tasks/<task>/` 定义环境与专家策略，
 `configs/<task>/<setting>/{gym_config.json,action_config.json}` 定义场景/相机/随机化与专家轨迹参数。
 `action_config.json` 通常在任务根目录，找不到才回落到 setting 子目录（`find_action_config`）。
-setting：`clear`（无随机化，日常验证）、`random`（官方评测口径）、`random_3p`（random + 仅录像用第三视角，
-**不进模型观测**）、`aug_*` / `coverage_*`（自制采集配置）。
+setting：`clear`（无随机化，日常验证）、`random`（官方评测口径）、`aug_*` / `coverage_*`（自制采集配置）。
+**评测 setting 只有官方的 `clear` / `random`**：`random_3p`（random + 第三视角录像相机）已于 2026-09-03 全部删除——
+多出的相机会改变随机数消耗顺序，同一 seed 出的场景与官方 `random` 不同，评估录像就用官方三相机。
 评测任务只有 `_print_available_tasks.sh` 列出的 10 个（低/中/高三档）；`tasks/_other_tasks/` 里那几个
 （`pour_water`、`open_pan` 等）是历史/派生环境，不进评测，别拿它们的判定当参考。
 

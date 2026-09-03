@@ -376,7 +376,7 @@ run_job() {
             if [[ -d "$runtime_overlay" ]]; then
                 export PYTHONPATH="$runtime_overlay:$embodichain_root/embodichain_tasks:$embodichain_root${PYTHONPATH:+:$PYTHONPATH}"
             fi
-            bash eval.sh "$task" random_3p "$config" "$model" 0 \
+            bash eval.sh "$task" random "$config" "$model" 0 \
                 --checkpoint_id "$step" \
                 --pi0_step "$horizon" \
                 --max_episodes "$episodes" \
@@ -487,7 +487,7 @@ payload = {
     "episodes_per_job": int(episodes),
     "paired_seed_base": 832500,
     "paired_seed_task_stride": 1000,
-    "setting": "random_3p",
+    "setting": "random",
     "camera_keys": ["cam_left_wrist", "cam_right_wrist", "cam_high", "cam_third"],
     "video_layout": "horizontal_four_view_composite_2560x480",
     "workers": int(workers),

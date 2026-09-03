@@ -436,7 +436,7 @@ def render_markdown(
         "- 执行 horizon：`10、50`；模型动作 horizon 固定为 64。",
         "- 固定配对 seed：同一任务在所有 checkpoint/horizon 下使用相同 20 个场景。",
         "- 视频：每局一个 2560×480 四视角横向拼接 MP4，依次为左腕、右腕、顶部、全局第三视角。",
-        "- setting：`random_3p`；成功由任务正式评估器判定。",
+        "- setting：`random`；成功由任务正式评估器判定。",
         "",
     ]
     lines += render_selection_markdown(selection)

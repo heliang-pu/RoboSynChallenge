@@ -64,7 +64,7 @@ uv pip install --python "$WS/venvs/eval_venv_act/bin/python" \
 ```bash
 env -u CUDA_VISIBLE_DEVICES "$WS/venvs/eval_venv_act/bin/python" scripts/eval_policy.py \
   --config policy/act/deploy_policy.yml --overrides \
-  --task_name <task> --setting random_3p --checkpoint_path <ckpt> --gpu_id <N> ...
+  --task_name <task> --setting random --checkpoint_path <ckpt> --gpu_id <N> ...
 ```
 
 ### 2. `ALL_PROXY` 是 socks 时 httpx 直接报错
