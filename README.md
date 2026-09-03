@@ -13,7 +13,7 @@
 
 > **分支导航** — 本仓库按主题分支开发，每个分支的说明就在各自 README 的这个位置。
 >
-> [`main`](../../tree/main) 测评 · [`official/main`](../../tree/official/main) 官方同步 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练 · **`feat/parallel-eval`（当前）** 并行评估
+> [`main`](../../tree/main) 测评汇总 · [`official/main`](../../tree/official/main) 官方同步 · **`feat/parallel-eval`（当前）** 并行评估 · [`feat/parallel-collect`](../../tree/feat/parallel-collect) 并行采集 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练 · [`fix/random-spawn-reachability`](../../tree/fix/random-spawn-reachability) 生成范围可达性
 
 ## 本分支：`feat/parallel-eval` — 单进程多环境并行评估
 
