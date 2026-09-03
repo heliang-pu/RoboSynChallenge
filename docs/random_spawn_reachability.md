@@ -1,7 +1,7 @@
 # `random` 评测配置的物体生成范围修正（可达性）
 
 分支：`fix/random-spawn-reachability`（从 `main` `8fc3081` 切出，worktree `../RoboSynChallenge-spawn-fix`）。
-分析日期：2026-09-02。改动只涉及 `configs/<task>/random/gym_config.json` 与 `configs/<task>/random_3p/gym_config.json`
+分析日期：2026-09-02。改动只涉及 `configs/<task>/random/gym_config.json` 与 `configs/<task>/random/gym_config.json`
 里物体 pose 随机化事件的 `position_range`；旋转范围、`clear`/`coverage_*`/`aug_*` 配置、`robosynchallenge/tasks/` 均未动。
 
 ## 1. 问题
@@ -133,7 +133,7 @@ milk 放入点 = basket 位置 +0.18 y，离左臂基座 0.43–0.54 m）不改�
 | sample_loading | rack `random_rack_pose` | [0.63,0.70]×[0.00,0.15] | [0.67,0.70]×[0.00,0.08] | 覆盖审计数据 |
 | handle_basket | milk `init_milk_pose` | [0.60,0.75]×[0.05,0.30] | [0.67,0.75]×[0.05,0.30] | 几何推断 |
 
-z 分量一律不变。`random_3p` 与 `random` 同步改。
+z 分量一律不变。`random`（random 已删除） 与 `random` 同步改。
 
 ## 4. 已知问题
 

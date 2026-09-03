@@ -35,7 +35,7 @@ for i in "${!tasks[@]}"; do
             cd "$pi05" || exit 1
             export PYTHONUNBUFFERED=1 PYTHONFAULTHANDLER=1 EMBODICHAIN_SIM_EXIT_PROCESS=0 MALLOC_ARENA_MAX=2
             export XLA_PYTHON_CLIENT_MEM_FRACTION=0.55
-            bash eval.sh "$task" random_3p "$config" "$model" 0 \
+            bash eval.sh "$task" random "$config" "$model" 0 \
                 --checkpoint_id "$checkpoint" --pi0_step 64 --max_episodes 10 \
                 --seed "$((832500 + i * 1000))" --headless true --pytorch_device cuda \
                 --eval_video_log true \
