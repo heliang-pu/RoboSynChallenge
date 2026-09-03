@@ -106,7 +106,7 @@ python -m policy.pi05.realtime_vla.validate_outputs ...
 **任务 → 配置 → 环境**。`robosynchallenge/tasks/<task>/` 定义环境与专家策略，
 `configs/<task>/<setting>/{gym_config.json,action_config.json}` 定义场景/相机/随机化与专家轨迹参数。
 `action_config.json` 通常在任务根目录，找不到才回落到 setting 子目录（`find_action_config`）。
-setting：`clear`（无随机化，日常验证）、`random`（官方评测口径）、`random_3p`（random + 仅录像用第三视角，
+setting：`clear`（无随机化，日常验证）、`random`（官方评测口径）、`random`（random 已删除）（random + 仅录像用第三视角，
 **不进模型观测**）。评测任务只有 `_print_available_tasks.sh` 列出的 10 个。
 
 `robosynchallenge/managers/{actions,datasets,events,observations}.py` 通过把模块名 append 进
