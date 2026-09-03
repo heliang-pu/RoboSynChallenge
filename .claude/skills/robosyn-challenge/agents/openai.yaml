@@ -1,0 +1,4 @@
+interface:
+  display_name: "RoboSynChallenge 2026"
+  short_description: "赛制与官方评测口径、打分公式、判定与引擎红线、环境分层与仓库约定"
+  default_prompt: "Use $robosyn-challenge to evaluate <policy> on <task> and score the run."
