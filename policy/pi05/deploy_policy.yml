@@ -48,3 +48,15 @@ prefix_attention_schedule: exp # zeros | ones | linear | exp
 max_guidance_weight: 10.0
 rtc_correction: vjp  # vjp = differentiate through the denoiser (per the paper)
                      # identity = cheap approximation used by the LeRobot port
+
+# ------------------------------------------------------------------
+# Inference backend: jax (OpenPI, default) or realtime_vla (Triton kernels from
+# dexmal/realtime-vla; see policy/pi05/realtime_vla/README.md). RTC / async
+# modes below require the jax backend.
+# ------------------------------------------------------------------
+inference_backend: jax
+checkpoint_root: null # Optional checkpoint root overriding PI05_CHECKPOINT_ROOT; layout <root>/<train_config>/<model_name>/<step>.
+converted_checkpoint: null # Required by realtime_vla; path to the converted .pkl.
+realtime_vla_dir: null # Defaults to $REALTIME_VLA_DIR, then ../realtime-vla next to the repo.
+tokenizer_path: null # Defaults to ~/.cache/openpi/big_vision/paligemma_tokenizer.model.
+prompt_for_allocation: click the bell # realtime_vla sizes its prompt buffer from this; use the longest instruction the model will see.

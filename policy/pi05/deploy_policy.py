@@ -117,6 +117,13 @@ def get_model(usr_args):
             "train_config_name and model_name must be provided in usr_args"
         )
 
+    inference_backend = str(usr_args.get("inference_backend", "jax"))
+    if inference_backend != "jax" and (rtc_enabled or async_mode != "off"):
+        raise ValueError(
+            f"inference_backend={inference_backend!r} only supports the synchronous "
+            "path: RTC guidance and async_mode need the jax backend"
+        )
+
     model = PI0(
         train_config_name=train_config_name,
         model_name=model_name,
@@ -125,6 +132,12 @@ def get_model(usr_args):
         pytorch_device=pytorch_device,
         max_guidance_weight=float(usr_args.get("max_guidance_weight", 10.0)),
         rtc_correction=str(usr_args.get("rtc_correction", "vjp")),
+        inference_backend=inference_backend,
+        checkpoint_root=usr_args.get("checkpoint_root"),
+        converted_checkpoint=usr_args.get("converted_checkpoint"),
+        realtime_vla_dir=usr_args.get("realtime_vla_dir"),
+        tokenizer_path=usr_args.get("tokenizer_path"),
+        prompt_for_allocation=usr_args.get("prompt_for_allocation", "click the bell"),
     )
 
     model.async_mode = async_mode

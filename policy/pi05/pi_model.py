@@ -73,6 +73,12 @@ class PI0:
         pytorch_device="cuda",
         max_guidance_weight=10.0,
         rtc_correction="vjp",
+        inference_backend="jax",
+        checkpoint_root=None,
+        converted_checkpoint=None,
+        realtime_vla_dir=None,
+        tokenizer_path=None,
+        prompt_for_allocation="click the bell",
     ):
         self.train_config_name = train_config_name
         self.model_name = model_name
@@ -87,7 +93,14 @@ class PI0:
         # repository.  ``PI05_CHECKPOINT_RUN_ROOT`` points directly at the
         # experiment directory whose children are numeric checkpoint steps.
         checkpoint_run_root = os.environ.get("PI05_CHECKPOINT_RUN_ROOT")
-        if checkpoint_run_root:
+        if checkpoint_root:
+            checkpoint_dir = str(
+                Path(checkpoint_root)
+                / self.train_config_name
+                / self.model_name
+                / str(self.checkpoint_id)
+            )
+        elif checkpoint_run_root:
             checkpoint_dir = str(Path(checkpoint_run_root) / str(self.checkpoint_id))
         else:
             checkpoint_base_root = os.environ.get(
@@ -112,12 +125,33 @@ class PI0:
             checkpoint_dir,
         )
         self.action_horizon = int(config.model.action_horizon)
-        self.policy = _policy_config.create_trained_policy(
-            config,
-            checkpoint_dir,
-            pytorch_device=pytorch_device,
+        self.inference_backend = inference_backend
+        if inference_backend == "jax":
+            self.policy = _policy_config.create_trained_policy(
+                config,
+                checkpoint_dir,
+                pytorch_device=pytorch_device,
             )
-        print("loading model success!")
+        elif inference_backend == "realtime_vla":
+            # Triton kernels from dexmal/realtime-vla on a converted copy of the
+            # same checkpoint; see policy/pi05/realtime_vla/README.md.
+            from policy.pi05.realtime_vla.accelerated_policy import RealtimeVlaPi05Policy
+
+            if converted_checkpoint is None:
+                raise ValueError("converted_checkpoint is required for inference_backend=realtime_vla")
+            asset_id = _checkpoint_asset_id(checkpoint_dir)
+            self.policy = RealtimeVlaPi05Policy(
+                converted_checkpoint=converted_checkpoint,
+                norm_stats_path=Path(checkpoint_dir) / "assets" / asset_id / "norm_stats.json",
+                tokenizer_path=tokenizer_path
+                or str(Path.home() / ".cache/openpi/big_vision/paligemma_tokenizer.model"),
+                realtime_vla_dir=realtime_vla_dir or os.environ.get("REALTIME_VLA_DIR", "../realtime-vla"),
+                prompt_for_allocation=prompt_for_allocation,
+                chunk_size=self.action_horizon,
+            )
+        else:
+            raise ValueError(f"Unsupported inference_backend: {inference_backend}")
+        print(f"loading model success! backend={inference_backend}")
 
         # Real-Time Chunking needs its guidance target in the *model's* action
         # space, but the policy hands back environment-space actions: for this
@@ -196,6 +230,8 @@ class PI0:
         """
         assert self.observation_window is not None, "update observation_window first!"
         kwargs = {}
+        if guidance is not None and self.inference_backend != "jax":
+            raise ValueError("RTC guidance is only implemented for the jax backend")
         if guidance is not None:
             kwargs.update(
                 prev_chunk=self.to_model_action_space(guidance["prev_actions_env"]),

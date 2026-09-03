@@ -63,6 +63,39 @@
 
 <!-- branch-readme:end -->
 
+# Contents
+
+> **分支导航** — 本仓库按主题分支开发，每个分支的说明就在各自 README 的这个位置。
+>
+> [`main`](../../tree/main) 测评 · [`official/main`](../../tree/official/main) 官方同步 · [`sim-recap`](../../tree/sim-recap) RECAP 价值函数 · [`feat/rtc-async-pi05`](../../tree/feat/rtc-async-pi05) 实时分块与异步执行 · [`feat/realtime-vla-pi05`](../../tree/feat/realtime-vla-pi05) 推理加速 · [`ppo-post-training`](../../tree/ppo-post-training) PPO 后训练 · **`feat/parallel-eval`（当前）** 并行评估
+
+## 本分支：`feat/parallel-eval` — 单进程多环境并行评估
+
+给 `scripts/eval_policy.py` 加 **wave 批次并行评估**（`--num_envs N`），利用
+EmbodiChain/DexSim 的多 arena 批量仿真（PhysX GPU 物理 + camera group 批量渲染），
+一个进程一张卡同时推进 N 个 episode。与既有的 `num_shards` 多进程分片正交，可叠加。
+
+```bash
+python scripts/eval_policy.py --config policy/act/deploy_policy.yml \
+    --overrides --task_name click_bell --setting random \
+    --max_episodes 100 --num_envs 8 --device cuda --headless True
+```
+
+- **种子口径不变**：rng 按 episode 序号同序抽种子，每个槽位
+  `reset(seed=seed_k, reset_ids=[slot])` 单独播种，初始场景与单环境同种子逐位一致（实测）
+- **官方判定逐条对应**：`ParallelEvalProxy` 每步锁存 per-env `is_task_success`，
+  截断步不计成功；聚合布尔喂给适配器，**策略适配器零改动**
+- **`num_envs=1`（默认）走原串行循环**，行为与 main 一致
+- 顺手修复：`env.close()` 会终止进程，原先放 `finally` 导致 summary 与
+  `evaluation_metrics.json` 从未落盘；已挪到指标写盘之后
+- 支持状态：`act` 进程内路径 ✅；worker 类与 `pi05`（openpi/JAX）待批量化
+
+设计、语义、已知偏差与策略支持表：**[docs/parallel_eval.md](docs/parallel_eval.md)**。
+
+---
+
+<!-- branch-readme:end -->
+
 # 目录
 
 - [项目简介](#项目简介)

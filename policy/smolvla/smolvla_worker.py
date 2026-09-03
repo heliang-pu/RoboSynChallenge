@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -102,6 +103,10 @@ def main() -> int:
                 raise ValueError(f"Unsupported command: {cmd}")
 
             with contextlib.redirect_stdout(sys.stderr):
+                # 实验开关:每次请求都清空 lerobot 的动作队列,让 n_action_steps 个
+                # 动作全部来自对「本次观测」的重新推理(真闭环),而不是弹旧 chunk。
+                if os.environ.get("SMOLVLA_REINFER_EACH_REQUEST") == "1":
+                    policy.reset()
                 obs, task = _load_obs(request["obs_path"])
                 # 仿真侧传来的图像是 uint8。新版 lerobot 的预处理管线会先做
                 # resize(upsample_bilinear2d),该算子不支持 Byte,需先转 float
