@@ -25,6 +25,7 @@ import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
 import openpi.training.misc.polaris_config as polaris_config
 import openpi.training.misc.roboarena_config as roboarena_config
+import openpi.training.mixture as _mixture
 import openpi.training.optimizer as _optimizer
 import openpi.training.weight_loaders as weight_loaders
 import openpi.transforms as _transforms
@@ -96,6 +97,11 @@ class DataConfig:
     action_space: droid_rlds_dataset.DroidActionSpace | None = None
     # List of datasets to sample from: name, version, weight, and optionally filter_dict_path
     datasets: Sequence[droid_rlds_dataset.RLDSDataset] = ()
+
+    # Optional weighted mixture of LeRobot datasets (e.g. simulated + real data). When set, the
+    # data loader reads these sources instead of ``repo_id``. ``repo_id`` is then only used as the
+    # asset id under which the normalization stats of the whole mixture are stored.
+    mixture_sources: Sequence[_mixture.DatasetSource] = ()
 
 
 class GroupFactory(Protocol):
@@ -364,6 +370,9 @@ class LeRobotEmbodiChainDataConfig(DataConfigFactory):
 
     extra_delta_transform: bool = False
     action_sequence_keys: Sequence[str] = ("action",)
+    # Optional weighted mixture of datasets. See ``openpi.training.mixture`` for details.
+    mixture_sources: Sequence[_mixture.DatasetSource] = ()
+
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
         # The repack transform is *only* applied to the data coming from the dataset,
@@ -430,6 +439,7 @@ class LeRobotEmbodiChainDataConfig(DataConfigFactory):
             data_transforms=data_transforms,
             model_transforms=model_transforms,
             action_sequence_keys=self.action_sequence_keys,
+            mixture_sources=tuple(self.mixture_sources),
         )
 
 
@@ -860,6 +870,38 @@ _CONFIGS = [
             extra_delta_transform=True,
         ),
         # pytorch_weight_path="/root/.cache/openpi/openpi-assets/checkpoints/pi05_base_torch",
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=20_000,
+        batch_size=64,
+        fsdp_devices=1,
+    ),
+    # Sim + real co-training for a dual-arm CobotMagic built from PiPER arms with 70 mm grippers.
+    # Simulated gripper values (V100, 1.0 = 100 mm) are rescaled to the PiPER 70 mm convention
+    # (1.0 = 70 mm) so that both datasets and the deployed robot share one gripper unit.
+    # Replace the repo ids with your own datasets and tune the weights; see
+    # docs/tutorials/sim2real_piper.md.
+    TrainConfig(
+        name="pi05_robosynchallenge_sim2real",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=50),
+        data=LeRobotEmbodiChainDataConfig(
+            # Asset id for the normalization stats of the whole mixture.
+            repo_id="RoboSynChallenge/sim2real_click_bell",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+            mixture_sources=(
+                _mixture.DatasetSource(
+                    repo_id="RoboSynChallenge/cobotmagic_Sim_click_bell",
+                    weight=0.5,
+                    gripper_scale=_mixture.SIM_V100_TO_PIPER_70MM,
+                ),
+                # Your own real-robot dataset, recorded on PiPER arms with 70 mm grippers.
+                _mixture.DatasetSource(
+                    repo_id="piper_real/click_bell",
+                    weight=0.5,
+                    gripper_scale=1.0,
+                ),
+            ),
+        ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         num_train_steps=20_000,
         batch_size=64,

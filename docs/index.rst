@@ -23,6 +23,7 @@ Documentation for RoboSynChallenge
    tutorials/collect_data
    tutorials/download_data
    tutorials/task_trajectory
+   tutorials/sim2real_piper
    tutorials/policy/index
 
 .. Indices and tables

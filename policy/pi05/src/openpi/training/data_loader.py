@@ -14,6 +14,7 @@ import torch
 import openpi.models.model as _model
 import openpi.training.config as _config
 from openpi.training.droid_rlds_dataset import DroidRldsDataset
+import openpi.training.mixture as _mixture
 import openpi.transforms as _transforms
 
 T_co = TypeVar("T_co", covariant=True)
@@ -131,15 +132,25 @@ def create_torch_dataset(
     data_config: _config.DataConfig, action_horizon: int, model_config: _model.BaseModelConfig
 ) -> Dataset:
     """Create a dataset for training."""
+    if data_config.mixture_sources:
+        return _create_mixture_dataset(data_config, action_horizon)
+
     repo_id = data_config.repo_id
     if repo_id is None:
         raise ValueError("Repo ID is not set. Cannot create dataset.")
     if repo_id == "fake":
         return FakeDataset(model_config, num_samples=1024)
 
+    dataset, _ = _create_lerobot_dataset(repo_id, data_config, action_horizon)
+    return dataset
+
+
+def _create_lerobot_dataset(
+    repo_id: str, data_config: _config.DataConfig, action_horizon: int
+) -> tuple[Dataset, lerobot_dataset.LeRobotDatasetMetadata]:
     dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
     dataset = lerobot_dataset.LeRobotDataset(
-        data_config.repo_id,
+        repo_id,
         delta_timestamps={
             key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
         },
@@ -148,7 +159,42 @@ def create_torch_dataset(
     if data_config.prompt_from_task:
         dataset = TransformedDataset(dataset, [_transforms.PromptFromLeRobotTask(dataset_meta.tasks)])
 
-    return dataset
+    return dataset, dataset_meta
+
+
+def _create_mixture_dataset(data_config: _config.DataConfig, action_horizon: int) -> Dataset:
+    """Create a weighted mixture of LeRobot datasets, e.g. simulated and real-robot data."""
+    datasets = []
+    fps_by_source = {}
+    for source in data_config.mixture_sources:
+        dataset, meta = _create_lerobot_dataset(source.repo_id, data_config, action_horizon)
+        if source.gripper_scale != 1.0:
+            dataset = TransformedDataset(
+                dataset,
+                [
+                    _mixture.GripperRescale(
+                        scale=source.gripper_scale,
+                        dims=tuple(source.gripper_dims),
+                        keys=tuple(source.rescale_keys),
+                    )
+                ],
+            )
+        datasets.append(dataset)
+        fps_by_source[source.repo_id] = meta.fps
+
+    if len(set(fps_by_source.values())) > 1:
+        logging.warning(
+            "Mixture sources are recorded at different frame rates %s. Each action chunk spans "
+            "action_horizon frames of its own dataset, so chunks from different sources cover "
+            "different durations. Resample the datasets to one rate for best results.",
+            fps_by_source,
+        )
+
+    return _mixture.WeightedMixtureDataset(
+        datasets,
+        [source.weight for source in data_config.mixture_sources],
+        names=[source.repo_id for source in data_config.mixture_sources],
+    )
 
 
 def create_rlds_dataset(

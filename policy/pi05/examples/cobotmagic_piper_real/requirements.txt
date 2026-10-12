@@ -1,0 +1,11 @@
+# Robot-side client for the dual-arm CobotMagic PiPER robot.
+# Install from policy/pi05:
+#   pip install -r examples/cobotmagic_piper_real/requirements.txt
+#   pip install -e packages/openpi-client
+numpy
+pillow
+tyro
+typing_extensions
+pyrealsense2
+python-can>=4.0
+pyAgxArm @ git+https://github.com/agilexrobotics/pyAgxArm.git
